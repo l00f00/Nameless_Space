@@ -33,25 +33,10 @@ function loadAssetFromUrl(url, type) {
 }
 
 async function loadEnvironment() {
-  // HDR environment atlas per riflessioni PBR.
-  // Usiamo più URL per evitare regressioni/404 su branch rinominati.
-  const envCandidates = [
-    'https://raw.githubusercontent.com/playcanvas/engine/main/examples/assets/cubemaps/helipad-env-atlas.png',
-    'https://cdn.jsdelivr.net/gh/playcanvas/engine@main/examples/assets/cubemaps/helipad-env-atlas.png'
-  ];
-
-  for (const envUrl of envCandidates) {
-    try {
-      const envAsset = await loadAssetFromUrl(envUrl, 'texture');
-      app.scene.envAtlas = envAsset.resource;
-      return;
-    } catch (error) {
-      console.warn('Environment atlas non caricato da:', envUrl, error);
-    }
-  }
-
-  // Fallback sicuro: non bloccare l'avvio della scena se l'env non è disponibile.
-  console.warn('Nessun environment atlas disponibile, continuo senza riflessioni HDR.');
+  // HDR environment cubemap per riflessioni PBR.
+  const envUrl = 'https://raw.githubusercontent.com/playcanvas/engine/master/examples/assets/cubemaps/helipad-env-atlas.png';
+  const envAsset = await loadAssetFromUrl(envUrl, 'texture');
+  app.scene.envAtlas = envAsset.resource;
 }
 
 function createPbrMaterial({ color = new pc.Color(1, 1, 1), metalness = 0.2, gloss = 0.65 } = {}) {
