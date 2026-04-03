@@ -33,45 +33,10 @@ function loadAssetFromUrl(url, type) {
 }
 
 async function loadEnvironment() {
-  // HDR environment atlas per riflessioni PBR.
-  // Usiamo più URL per evitare regressioni/404 su branch rinominati.
-  const envCandidates = [
-    'https://raw.githubusercontent.com/playcanvas/engine/main/examples/assets/cubemaps/helipad-env-atlas.png',
-    'https://cdn.jsdelivr.net/gh/playcanvas/engine@main/examples/assets/cubemaps/helipad-env-atlas.png'
-  ];
-
-  for (const envUrl of envCandidates) {
-    try {
-      const envAsset = await loadAssetFromUrl(envUrl, 'texture');
-      app.scene.envAtlas = envAsset.resource;
-      return;
-    } catch (error) {
-      console.warn('Environment atlas non caricato da:', envUrl, error);
-    }
-  }
-
-  // Fallback sicuro: non bloccare l'avvio della scena se l'env non è disponibile.
-  console.warn('Nessun environment atlas disponibile, continuo senza riflessioni HDR.');
-}
-
-
-async function loadDoorContainer() {
-  const doorCandidates = [
-    'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/main/2.0/Box/glTF-Binary/Box.glb',
-    'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@main/2.0/Box/glTF-Binary/Box.glb',
-    'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF-Binary/Box.glb'
-  ];
-
-  for (const doorUrl of doorCandidates) {
-    try {
-      return await loadAssetFromUrl(doorUrl, 'container');
-    } catch (error) {
-      console.warn('Door GLB non caricato da:', doorUrl, error);
-    }
-  }
-
-  console.warn('Nessun GLB porta disponibile, uso fallback box locale.');
-  return null;
+  // HDR environment cubemap per riflessioni PBR.
+  const envUrl = 'https://raw.githubusercontent.com/playcanvas/engine/master/examples/assets/cubemaps/helipad-env-atlas.png';
+  const envAsset = await loadAssetFromUrl(envUrl, 'texture');
+  app.scene.envAtlas = envAsset.resource;
 }
 
 function createPbrMaterial({ color = new pc.Color(1, 1, 1), metalness = 0.2, gloss = 0.65 } = {}) {
@@ -180,7 +145,10 @@ async function buildWorld() {
   const rooms = [createRoom(0, 0), createRoom(1, -12), createRoom(2, -24)];
 
   // GLB model: usato come porta fisica (una mesh semplice ma formato glTF).
-  const doorGlb = await loadDoorContainer();
+  const doorGlb = await loadAssetFromUrl(
+    'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF-Binary/Box.glb',
+    'container'
+  );
 
   const manager = createExperienceManager(app);
 

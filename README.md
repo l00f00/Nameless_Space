@@ -33,23 +33,6 @@ Poi apri:
 
 > Nota: non aprire `index.html` direttamente con `file://` perché alcuni browser bloccano/modificano il comportamento di moduli ES e asset remoti.
 
-
-## Provarlo online con GitHub Pages
-
-Sì, puoi pubblicarlo online direttamente dal repo GitHub.
-
-1. Pusha il progetto su un repository GitHub.
-2. Assicurati che il branch principale sia `main` (il workflow ascolta i push su `main`).
-3. Vai in **Settings → Pages** e imposta **Source: GitHub Actions**.
-4. Fai push: partirà il workflow `.github/workflows/deploy-pages.yml`.
-5. A deploy finito, troverai l’URL pubblico tipo:
-   - `https://<tuo-user>.github.io/<nome-repo>/`
-
-### Posso interagirci io direttamente?
-
-Posso aiutarti a preparare tutto, debuggare codice e guidarti passo-passo, ma non posso cliccare/interagire direttamente con il tuo browser o il tuo account GitHub.
-Se mi incolli URL, errori della Action o console log, ti guido subito nella risoluzione.
-
 ## Controlli
 
 - **Desktop**
@@ -79,21 +62,3 @@ Se mi incolli URL, errori della Action o console log, ti guido subito nella riso
 - Materiali **PBR** applicati via `pc.StandardMaterial`
 - Environment atlas per riflessioni
 - Shadow mapping con fallback qualità su mobile
-
-
-## Troubleshooting rapido
-
-- `favicon.ico 404`: risolto usando un favicon testuale `favicon.svg` (niente binari) e link esplicito in `index.html`.
-- `helipad-env-atlas.png 404`: il codice usa URL aggiornati su branch `main` + fallback CDN (`jsdelivr`) e **non blocca** più il bootstrap se l’HDR env non è disponibile.
-- Schermata nera all'avvio: se il GLB remoto non è raggiungibile, la scena ora usa automaticamente una porta fallback (box locale), quindi l'app parte comunque.
-
-
-## Auto-merge PR
-
-Puoi abilitare l'auto-merge su GitHub:
-
-1. `Settings → General → Pull Requests` e attiva **Allow auto-merge**.
-2. Crea branch protection su `main` (opzionale ma consigliato) con check richiesti.
-3. Nella PR clicca **Enable auto-merge** scegliendo `Squash`, `Merge` o `Rebase`.
-
-Se vuoi auto-merge completamente automatico da bot/workflow, puoi usare `gh pr merge --auto --squash <numero-pr>` in una GitHub Action con token adeguato.

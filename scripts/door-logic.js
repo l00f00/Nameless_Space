@@ -6,7 +6,7 @@ export function createDoor(app, config) {
   pivot.setPosition(config.pivotPos);
   config.root.addChild(pivot);
 
-  const door = buildDoorEntity(config);
+  const door = config.containerAsset.resource.instantiateRenderEntity({ castShadows: true });
   door.name = config.name;
   door.setLocalPosition(config.localPos.clone().sub(config.pivotPos));
   door.setLocalScale(0.9, 2.4, 0.1);
@@ -49,19 +49,4 @@ export function createDoor(app, config) {
 function applyMaterialRecursively(entity, material) {
   if (entity.render) entity.render.material = material;
   entity.children.forEach((child) => applyMaterialRecursively(child, material));
-}
-
-
-function buildDoorEntity(config) {
-  if (config.containerAsset?.resource) {
-    return config.containerAsset.resource.instantiateRenderEntity({ castShadows: true });
-  }
-
-  const fallbackDoor = new pc.Entity(`${config.name}-fallback`);
-  fallbackDoor.addComponent('render', {
-    type: 'box',
-    castShadows: true,
-    receiveShadows: true
-  });
-  return fallbackDoor;
 }
