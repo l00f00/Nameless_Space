@@ -1,9 +1,11 @@
 <!doctype html>
 <html lang="en">
+
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PlayCanvas - Sequential Rooms</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <style>
       html,
       body {
@@ -21,16 +23,176 @@
       }
 
       .hud {
+        display: none;
+      }
+
+      #start-overlay {
         position: fixed;
-        top: 12px;
-        left: 12px;
-        z-index: 10;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
         color: #fff;
-        background: rgba(0, 0, 0, 0.5);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.08);
+        padding: 48px 28px 36px;
+        box-sizing: border-box;
+        font-size: 18px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        pointer-events: none;
+      }
+
+      #start-copy {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        margin-top: 8vh;
+      }
+
+      #start-title {
+        max-width: 900px;
+        color: #c61111;
+        font-family: "Courier New", monospace;
+        font-size: clamp(18px, 2vw, 28px);
+        line-height: 1.4;
+        letter-spacing: 0.04em;
+        text-transform: none;
+        white-space: pre-line;
+        text-align: center;
+        text-shadow: 0 0 14px rgba(198, 17, 17, 0.25);
+      }
+
+      #start-prompt {
+        width: 100%;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.92);
         font-size: 14px;
+      }
+
+      #debug-panel {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        z-index: 30;
+        width: 320px;
+        max-height: calc(100vh - 28px);
+        overflow: auto;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.68);
+        color: #ddd;
+        font-size: 12px;
+        backdrop-filter: blur(6px);
+        display: none;
+      }
+
+      #debug-panel h3,
+      #debug-panel h4 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #fff;
+      }
+
+      #debug-panel h4 {
+        margin-top: 12px;
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .control-row input[type="range"] {
+        width: 100%;
+      }
+
+      .control-row span {
+        min-width: 42px;
+        text-align: right;
+        color: #aaa;
+      }
+
+      .debug-actions {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .debug-actions button {
+        flex: 1;
+      }
+
+      .debug-block {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .room-accordion {
+        margin-top: 10px;
+      }
+
+      .room-accordion details {
+        margin-top: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .room-accordion summary {
+        cursor: pointer;
+        color: #fff;
+        font-weight: 600;
+      }
+
+      #debug-json-overlay {
+        position: fixed;
+        left: 14px;
+        top: 14px;
+        bottom: 14px;
+        z-index: 25;
+        width: min(520px, calc(100vw - 28px));
+        overflow: auto;
+        padding: 10px 8px 10px 0;
+        color: #d8d8d8;
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        user-select: text;
+        display: none;
+        background: transparent;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+        direction: rtl;
+        text-align: left;
+        unicode-bidi: plaintext;
+      }
+
+      #debug-json-overlay::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      #debug-json-overlay::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      #debug-json-overlay::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+      }
+
+      .debug-pre {
+        white-space: pre-wrap;
+        line-height: 1.35;
+        color: #cfcfcf;
       }
 
       .btn {
@@ -76,17 +238,276 @@
       }
     </style>
   </head>
+
   <body>
+    <div id="loader" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #000 0%, #111 50%, #000 100%);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+    ">
+      <div id="typewriter-text" style="margin-bottom: 30px; font-family: 'Courier New', monospace; color: #c61111;">
+      </div>
+      <div style="
+        width: 300px;
+        height: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 20px;
+      ">
+        <div id="progress-bar" style="
+          height: 100%;
+          background: linear-gradient(90deg, #c61111, #ff4444);
+          width: 0%;
+          transition: width 0.3s ease;
+          box-shadow: 0 0 10px rgba(198, 17, 17, 0.5);
+        "></div>
+      </div>
+      <div style="font-size: 14px; opacity: 0.7;">Loading assets...</div>
+    </div>
     <canvas id="app"></canvas>
+    <div id="start-overlay">
+      <div id="start-copy">
+        <div id="start-title"></div>
+      </div>
+      <div id="start-prompt">Premi barra per iniziare</div>
+    </div>
+    <pre id="debug-json-overlay"></pre>
+    <aside id="debug-panel">
+      <h3>Controlli Luci</h3>
+      <div class="debug-actions">
+        <button id="pause-rail-btn" class="btn">Pausa percorso</button>
+        <button id="next-step-btn" class="btn">Next</button>
+        <button id="toggle-debug-btn" class="btn">Nascondi dati</button>
+      </div>
+      <div class="debug-actions">
+        <button id="copy-debug-btn" class="btn">Copia dati</button>
+      </div>
+      <div id="debug-controls">
+        <div class="room-accordion">
+          <details open data-scope="global">
+            <summary>Globale</summary>
+            <div class="control-row">
+              <label for="ambient-slider">Ambient</label>
+              <span id="ambient-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="ambient-slider" type="range" min="0.5" max="10" step="0.01" value="9.35" />
+            </div>
+            <div class="control-row">
+              <label for="key-slider">Key</label>
+              <span id="key-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="key-slider" type="range" min="0.5" max="10" step="0.01" value="9.24" />
+            </div>
+            <div class="control-row">
+              <label for="fill-slider">Soft Fill</label>
+              <span id="fill-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="fill-slider" type="range" min="0.5" max="10" step="0.01" value="9.21" />
+            </div>
+            <div class="control-row">
+              <label for="interior-slider">Interior</label>
+              <span id="interior-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="interior-slider" type="range" min="0.5" max="10" step="0.01" value="9.49" />
+            </div>
+            <div class="control-row">
+              <label for="transition-slider">Transition</label>
+              <span id="transition-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="transition-slider" type="range" min="0.5" max="10" step="0.01" value="7.47" />
+            </div>
+            <div class="control-row">
+              <label for="camera-fov-global-slider">FOV Globale</label>
+              <span id="camera-fov-global-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="camera-fov-global-slider" type="range" min="0.5" max="2.5" step="0.01" value="1" />
+            </div>
+          </details>
+        </div>
+        <div class="room-accordion">
+          <details open data-room-id="0">
+            <summary>Stanza 0</summary>
+            <div class="control-row">
+              <label for="room-0-fill-slider">Fill</label>
+              <span id="room-0-fill-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-0-fill-slider" type="range" min="0" max="10" step="0.01" value="1.9" />
+            </div>
+            <div class="control-row">
+              <label for="room-0-interior-slider">Interior</label>
+              <span id="room-0-interior-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-0-interior-slider" type="range" min="0" max="10" step="0.01" value="0.61" />
+            </div>
+            <div class="control-row">
+              <label for="room-0-transition-slider">Transition</label>
+              <span id="room-0-transition-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-0-transition-slider" type="range" min="0" max="10" step="0.01" value="5.44" />
+            </div>
+            <div class="control-row">
+              <label for="door-slider">Porte Intro</label>
+              <span id="door-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="door-slider" type="range" min="0.5" max="10" step="0.01" value="4.26" />
+            </div>
+          </details>
+          <details data-room-id="1">
+            <summary>Stanza 1</summary>
+            <div class="control-row">
+              <label for="room-1-fill-slider">Fill</label>
+              <span id="room-1-fill-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-1-fill-slider" type="range" min="0.5" max="10" step="0.01" value="0.5" />
+            </div>
+            <div class="control-row">
+              <label for="room-1-interior-slider">Interior</label>
+              <span id="room-1-interior-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-1-interior-slider" type="range" min="0.5" max="10" step="0.01" value="8.37" />
+            </div>
+            <div class="control-row">
+              <label for="room-1-transition-slider">Transition</label>
+              <span id="room-1-transition-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-1-transition-slider" type="range" min="0.5" max="10" step="0.01" value="4.8" />
+            </div>
+            <div class="control-row">
+              <label for="heart-slider">Heart Core</label>
+              <span id="heart-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="heart-slider" type="range" min="0.5" max="10" step="0.01" value="5.88" />
+            </div>
+            <div class="control-row">
+              <label for="firefly-slider">Lucciole</label>
+              <span id="firefly-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="firefly-slider" type="range" min="0.5" max="10" step="0.01" value="8.99" />
+            </div>
+            <div class="control-row">
+              <label for="heart-spot-a-slider">Faretto Cuore A</label>
+              <span id="heart-spot-a-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="heart-spot-a-slider" type="range" min="0.5" max="10" step="0.01" value="5.02" />
+            </div>
+            <div class="control-row">
+              <label for="heart-spot-b-slider">Faretto Cuore B</label>
+              <span id="heart-spot-b-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="heart-spot-b-slider" type="range" min="0.5" max="10" step="0.01" value="4.29" />
+            </div>
+            <div class="control-row">
+              <label for="heart-spot-c-slider">Faretto Cuore C</label>
+              <span id="heart-spot-c-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="heart-spot-c-slider" type="range" min="0.5" max="10" step="0.01" value="5.12" />
+            </div>
+            <div class="control-row">
+              <label for="camera-fov-heart-slider">FOV Cuore</label>
+              <span id="camera-fov-heart-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="camera-fov-heart-slider" type="range" min="0.5" max="2.5" step="0.01" value="2.09" />
+            </div>
+          </details>
+          <details data-room-id="2">
+            <summary>Stanza 2</summary>
+            <div class="control-row">
+              <label for="room-2-fill-slider">Fill</label>
+              <span id="room-2-fill-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-2-fill-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+            <div class="control-row">
+              <label for="room-2-interior-slider">Interior</label>
+              <span id="room-2-interior-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-2-interior-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+            <div class="control-row">
+              <label for="room-2-transition-slider">Transition</label>
+              <span id="room-2-transition-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-2-transition-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+          </details>
+          <details data-room-id="3">
+            <summary>Stanza 3</summary>
+            <div class="control-row">
+              <label for="room-3-fill-slider">Fill</label>
+              <span id="room-3-fill-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-3-fill-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+            <div class="control-row">
+              <label for="room-3-interior-slider">Interior</label>
+              <span id="room-3-interior-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-3-interior-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+            <div class="control-row">
+              <label for="room-3-transition-slider">Transition</label>
+              <span id="room-3-transition-value">1.00</span>
+            </div>
+            <div class="control-row">
+              <input id="room-3-transition-slider" type="range" min="0.5" max="10" step="0.01" value="1" />
+            </div>
+          </details>
+        </div>
+      </div>
+      <div class="debug-block">
+        <h4>Camera</h4>
+        <div id="camera-debug" class="debug-pre"></div>
+      </div>
+      <div class="debug-block">
+        <h4>Stanze</h4>
+        <div id="rooms-debug" class="debug-pre"></div>
+      </div>
+    </aside>
     <div class="hud">
-      <div>WASD / Touch per muoversi</div>
-      <div>Mouse / Touch dx per camera</div>
       <button id="xr-btn" class="btn">Enter WebXR (VR)</button>
     </div>
     <div id="move-zone" class="touch-zone"></div>
     <div id="look-zone" class="touch-zone"></div>
 
-    <script src="https://code.playcanvas.com/playcanvas-stable.min.js"></script>
-    <script type="module" src="./scripts/main.js"></script>
+    <script src="./assets/playcanvas-stable.min.js"></script>
+    <script type="module" src="./scripts/main.mjs"></script>
   </body>
+
 </html>
