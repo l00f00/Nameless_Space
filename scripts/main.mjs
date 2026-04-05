@@ -381,7 +381,7 @@ async function buildWorld() {
   ];
 
   // GLB model locale: usato come porta fisica.
-  const doorGlb = await loadAssetFromUrl('./assets/Box.glb', 'container');
+  const curtainsGlb = await loadAssetFromUrl('./assets/curtains.glb', 'container');
 
   // Modelli di test aggiunti dall'utente
   const testModels = {
@@ -496,27 +496,31 @@ async function buildWorld() {
     const rightCenter = panelHalf + (doorGap / 2);
 
     const left = createDoor(app, {
-      name: `left-door-${i}`,
-      containerAsset: doorGlb,
+      name: `left-curtain-${i}`,
+      containerAsset: curtainsGlb,
       root: doorRoot,
       localPos: new pc.Vec3(leftCenter, 0, 0),
-      pivotPos: new pc.Vec3(leftCenter - panelHalf, 0, 0), // cardine sul lato interno sinistro dell'anta
-      openYaw: 88,
+      mode: 'slide',
+      openOffset: new pc.Vec3(-1.15, 0, 0),
       color: new pc.Color(0.8, 0.03, 0.03),
-      rotation: new pc.Vec3(0, 0, 0),
-      panelWidth
+      rotation: new pc.Vec3(0, 90, 0),
+      localScale: new pc.Vec3(1.2, 1.4, 1.2),
+      panelWidth,
+      speed: 1.8
     });
 
     const right = createDoor(app, {
-      name: `right-door-${i}`,
-      containerAsset: doorGlb,
+      name: `right-curtain-${i}`,
+      containerAsset: curtainsGlb,
       root: doorRoot,
       localPos: new pc.Vec3(rightCenter, 0, 0),
-      pivotPos: new pc.Vec3(rightCenter + panelHalf, 0, 0), // cardine sul lato interno destro dell'anta
-      openYaw: -88,
+      mode: 'slide',
+      openOffset: new pc.Vec3(1.15, 0, 0),
       color: new pc.Color(0.8, 0.03, 0.03),
-      rotation: new pc.Vec3(0, 0, 0),
-      panelWidth
+      rotation: new pc.Vec3(0, -90, 0),
+      localScale: new pc.Vec3(1.2, 1.4, 1.2),
+      panelWidth,
+      speed: 1.8
     });
 
     // Aggiungi modelli specifici per ogni stanza
