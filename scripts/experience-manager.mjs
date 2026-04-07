@@ -1,45 +1,13 @@
-import { createTrigger } from './trigger-system.mjs';
-
 /**
  * Coordina stanze sequenziali, porte e attivazione esperienze.
  */
 export function createExperienceManager(app, lightRig = {}) {
   const rooms = [];
-  const triggers = [];
   let activeRoom = -1;
   const lightTransitionSpeed = 4.0; // Velocità di transizione delle luci
 
   function addRoom(room) {
     rooms.push(room);
-
-    const proximityTrigger = createTrigger(app, {
-      name: `door-proximity-${room.id}`,
-      center: new pc.Vec3(0, 1.6, room.zCenter - 2.6),
-      halfExtents: new pc.Vec3(2.8, 1.8, 4.1),
-      onEnter: () => {
-        room.doors.forEach((door) => door.setOpen(true));
-        // Pre-caricamento stanza (se ancora non fatto)
-        if (!room.preloaded) {
-          room.preloaded = true;
-          if (typeof room.preloadAssets === 'function') {
-            room.preloadAssets();
-          }
-        }
-        // Attiva gradualmente la luce di transizione
-        if (room.transitionLight) {
-          room.transitionLight.light.intensity = 0.5;
-        }
-      },
-      onExit: () => {
-        // Spegni gradualmente la luce di transizione quando ci si allontana
-        if (room.transitionLight) {
-          room.transitionLight.light.intensity = 0.0;
-        }
-      }
-    });
-
-    triggers.push(proximityTrigger);
-    app.root.addChild(proximityTrigger.entity);
   }
 
   function onRoomEnter(roomId) {
@@ -66,8 +34,6 @@ export function createExperienceManager(app, lightRig = {}) {
   }
 
   function update(playerPos, dt) {
-    triggers.forEach((trigger) => trigger.update(playerPos));
-
     // Aggiorna gradualmente le intensità delle luci
     rooms.forEach((room) => {
       const isActive = room.id === activeRoom;

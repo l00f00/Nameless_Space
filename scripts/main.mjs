@@ -1,8 +1,9 @@
 import { createPlayerController } from './player-controller.mjs';
 import { createDoor } from './door-logic.mjs';
-import { createTrigger } from './trigger-system.mjs';
 import { createExperienceManager } from './experience-manager.mjs';
 import { createRailSequence } from './rail-sequence.mjs';
+import { VignetteEffect } from './posteffects/vignette.mjs';
+import { BloomEffect } from './posteffects/bloom.mjs';
 
 // Loader functions
 let totalAssets = 0;
@@ -28,7 +29,7 @@ function updateLoaderProgress() {
 
 function countAssets() {
   // Conta gli asset che dobbiamo caricare
-  totalAssets = 8; // env texture + 4 textures + 3 models
+  totalAssets = 6; // env texture + 3 textures + 2 models usati davvero
 
   // Avvia effetto typewriter
   startTypewriter();
@@ -69,32 +70,45 @@ function startTypewriter() {
 
 function startStartOverlayTypewriter() {
   const lines = [
+    'Nameless Spaces',
     'Coming soon',
-    'Nameless',
-    'A Virtual art space curated by Melania Filidei, tech stuff by l00f00'
+    'Virtual Art Space',
+    'curated by Melania Filidei',
+    'collab l00f00'
   ];
   const element = document.getElementById('start-title');
   if (!element) return;
 
   let lineIndex = 0;
   let charIndex = 0;
-  element.textContent = '';
+  element.innerHTML = '';
+
+  const getLineClassName = (index) => {
+    if (index === 0) return 'start-line start-line--title';
+    return 'start-line start-line--meta';
+  };
 
   const typeLine = () => {
     if (lineIndex >= lines.length) return;
 
     const currentLine = lines[lineIndex];
+    let lineElement = element.children[lineIndex];
+    if (!lineElement) {
+      lineElement = document.createElement('div');
+      lineElement.className = getLineClassName(lineIndex);
+      element.appendChild(lineElement);
+    }
+
     if (charIndex < currentLine.length) {
-      element.textContent += currentLine.charAt(charIndex);
+      lineElement.textContent += currentLine.charAt(charIndex);
       charIndex++;
-      window.setTimeout(typeLine, lineIndex === 2 ? 24 : 55);
+      window.setTimeout(typeLine, lineIndex >= 2 ? 24 : 45);
       return;
     }
 
     lineIndex++;
     charIndex = 0;
     if (lineIndex < lines.length) {
-      element.textContent += '\n';
       window.setTimeout(typeLine, 220);
     }
   };
@@ -105,6 +119,26 @@ function startStartOverlayTypewriter() {
 function markSceneReady() {
   sceneInitialized = true;
   updateLoaderProgress();
+}
+
+function warmupRenderableAssets(rootEntity) {
+  const visit = (entity) => {
+    if (entity.render) {
+      const material = entity.render.material;
+      if (material) {
+        material.update();
+      }
+      entity.render.castShadows = Boolean(entity.render.castShadows);
+    }
+    entity.children.forEach(visit);
+  };
+
+  visit(rootEntity);
+}
+
+function setCanvasTunnelEffect(blurPx = 0, brightness = 1) {
+  const blur = Math.max(0, blurPx);
+  canvas.style.filter = `blur(${blur.toFixed(2)}px) brightness(${brightness.toFixed(3)})`;
 }
 
 const canvas = document.getElementById('app');
@@ -341,6 +375,15 @@ async function buildWorld() {
     fov: 70
   });
   cameraPivot.addChild(camera);
+  const vignetteEffect = new VignetteEffect(app.graphicsDevice);
+  const bloomEffect = new BloomEffect(app.graphicsDevice);
+  vignetteEffect.offset = 1.28;
+  vignetteEffect.darkness = 0.26;
+  bloomEffect.strength = 0;
+  bloomEffect.radius = 5;
+  bloomEffect.threshold = 0.58;
+  camera.camera.postEffects.addEffect(vignetteEffect);
+  camera.camera.postEffects.addEffect(bloomEffect);
 
   const playerController = createPlayerController(app, cameraPivot, camera, {
     moveZone: document.getElementById('move-zone'),
@@ -365,30 +408,135 @@ async function buildWorld() {
     color: new pc.Color(0.28, 0.28, 0.32),
     intensity: 0.9,
     castShadows: true,
-    shadowDistance: 50,
-    shadowResolution: isMobile ? 1024 : 2048,
+    shadowDistance: isMobile ? 22 : 34,
+    shadowResolution: isMobile ? 512 : 1024,
     normalOffsetBias: 0.03,
     shadowBias: 0.2
   });
   directional.setEulerAngles(50, 30, 0);
   app.root.addChild(directional);
 
-  const rooms = [
-    createRoom(0, 12, { floorTexture: floorTexture, wallTexture: wallTexture, ceilingTexture: ceilingTexture, doorWidth: 1.82, size: { width: 12, depth: 16 } }), // Stanza zero più grande all'entrata
-    createRoom(1, 0, { floorTexture: floorTexture, wallTexture: wallTexture, ceilingTexture: ceilingTexture, doorWidth: 1.82 }),
-    createRoom(2, -12, { floorTexture: floorTexture, wallTexture: wallTexture, ceilingTexture: ceilingTexture, doorWidth: 1.82 }),
-    createRoom(3, -24, { floorTexture: floorTexture, wallTexture: wallTexture, ceilingTexture: ceilingTexture, doorWidth: 1.82 })
+  const DEFAULT_DOOR_CONFIG = {
+    panelHalf: 0.45,
+    gap: 0.02,
+    speed: 1.8,
+    backWallOffset: 0.15,
+    initialRootY: 1.2
+  };
+  const DEFAULT_TRIGGER_CONFIG = {
+    centerOffset: new pc.Vec3(0, 1.5, -3),
+    halfExtents: new pc.Vec3(2.1, 1.55, 2.1)
+  };
+  const DEFAULT_ROOM_LIGHT_CONFIG = {
+    softFill: {
+      color: new pc.Color(0.24, 0.24, 0.28),
+      range: 6.5,
+      positionOffset: new pc.Vec3(0, 1.85, -2.8)
+    },
+    interior: {
+      color: new pc.Color(1.0, 0.45, 0.35),
+      innerConeAngle: 28,
+      outerConeAngle: 52,
+      range: 12,
+      positionOffset: new pc.Vec3(0, 2.3, -3.5),
+      euler: new pc.Vec3(90, 0, 0),
+      castShadows: !isMobile,
+      shadowResolution: isMobile ? 512 : 1024
+    },
+    transition: {
+      color: new pc.Color(0.8, 0.8, 1.0),
+      innerConeAngle: 45,
+      outerConeAngle: 60,
+      range: 15,
+      positionOffset: new pc.Vec3(0, 3, -2),
+      euler: new pc.Vec3(90, 0, 0),
+      castShadows: false
+    },
+    lowLight: false,
+    disableBaseLights: false
+  };
+  const TUNNEL_ROOM_IDS = Array.from({ length: 8 }, (_, index) => index + 1);
+  const ROOM_DEFINITIONS = [
+    {
+      id: 0,
+      sequenceNumber: 0,
+      kind: 'intro',
+      zCenter: 20,
+      doorWidth: 1.82,
+      size: { width: 12, depth: 28 },
+      door: { ...DEFAULT_DOOR_CONFIG, initialRootY: -8.8 },
+      trigger: { ...DEFAULT_TRIGGER_CONFIG },
+      light: {
+        ...DEFAULT_ROOM_LIGHT_CONFIG,
+        softFill: {
+          ...DEFAULT_ROOM_LIGHT_CONFIG.softFill,
+          range: 7.5,
+          positionOffset: new pc.Vec3(0, 1.85, -6.8)
+        }
+      }
+    },
+    // QUI VENGONO ISTANZIATE LE 8 STANZE TUNNEL: sequenza voluta = stanza prologo 0, stanze tunnel 1..8 con faretti a terra e porte aperte, stanza cuore 9.
+    ...TUNNEL_ROOM_IDS.map((id, index) => ({
+      id,
+      sequenceNumber: id,
+      kind: 'tunnel',
+      zCenter: 0 - index * 12,
+      doorWidth: 1.82,
+      door: { ...DEFAULT_DOOR_CONFIG },
+      trigger: { ...DEFAULT_TRIGGER_CONFIG },
+      light: {
+        ...DEFAULT_ROOM_LIGHT_CONFIG,
+        softFill: {
+          ...DEFAULT_ROOM_LIGHT_CONFIG.softFill,
+          color: new pc.Color(0.18, 0.18, 0.22),
+          range: 5.8
+        },
+        interior: {
+          ...DEFAULT_ROOM_LIGHT_CONFIG.interior,
+          color: new pc.Color(0.7, 0.36, 0.3),
+          range: 10
+        },
+        transition: {
+          ...DEFAULT_ROOM_LIGHT_CONFIG.transition,
+          range: 11
+        }
+      }
+    })),
+    {
+      id: 9,
+      sequenceNumber: 9,
+      kind: 'heart',
+      zCenter: -96,
+      doorWidth: 1.82,
+      door: { ...DEFAULT_DOOR_CONFIG },
+      trigger: { ...DEFAULT_TRIGGER_CONFIG },
+      light: {
+        ...DEFAULT_ROOM_LIGHT_CONFIG,
+        softFill: {
+          ...DEFAULT_ROOM_LIGHT_CONFIG.softFill,
+          color: new pc.Color(0.42, 0.12, 0.12)
+        },
+        lowLight: true
+      }
+    }
   ];
 
-  // GLB model locale: usato come porta fisica.
-  const curtainsGlb = await loadAssetFromUrl('./assets/curtains.glb', 'container');
+  const rooms = ROOM_DEFINITIONS.map((definition) =>
+    createRoom(definition.id, definition.zCenter, {
+      floorTexture,
+      wallTexture,
+      ceilingTexture,
+      doorWidth: definition.doorWidth,
+      size: definition.size
+    })
+  );
 
-  // Modelli di test aggiunti dall'utente
-  const testModels = {
-    camera: await loadAssetFromUrl('./assets/AntiqueCamera.glb', 'container'),
-    helmet: await loadAssetFromUrl('./assets/realistic_human_heart.glb', 'container'),
-    window: await loadAssetFromUrl('./assets/GlassBrokenWindow.glb', 'container'),
-    remains: await loadAssetFromUrl('./assets/remains.glb', 'container'),
+  // GLB model locale: usato come porta fisica.
+  const doorGlb = await loadAssetFromUrl('./assets/Box.glb', 'container');
+
+  // Per l'esperienza attuale carichiamo solo il cuore: le altre stanze restano vuote.
+  const visibleModels = {
+    heart: await loadAssetFromUrl('./assets/realistic_human_heart.glb', 'container')
   };
 
   function instantiateModel(asset, position, scale = new pc.Vec3(1, 1, 1), rotation = new pc.Vec3(0, 0, 0)) {
@@ -400,29 +548,19 @@ async function buildWorld() {
     return entity;
   }
 
-  function makeTranslucentGrayMaterial() {
-    const m = new pc.StandardMaterial();
-    m.diffuse = new pc.Color(0.7, 0.7, 0.7); // Grigio più chiaro
-    m.metalness = 0.0;
-    m.gloss = 0.3;
-    m.opacity = 0.8; // Più luminoso
-    m.blendType = pc.BLEND_NORMAL;
-    m.alphaTest = 0.0;
-    m.useMetalness = true;
-    m.update();
-    return m;
-  }
-
-  const translucentGrayMaterial = makeTranslucentGrayMaterial();
   const fireflyMaterial = new pc.StandardMaterial();
   fireflyMaterial.diffuse = new pc.Color(0.2, 0.02, 0.02);
   fireflyMaterial.emissive = new pc.Color(1.0, 0.12, 0.12);
-  fireflyMaterial.emissiveIntensity = 7.5;
+  fireflyMaterial.emissiveIntensity = 11.5;
   fireflyMaterial.useLighting = false;
   fireflyMaterial.update();
+  const runwayLightMaterial = new pc.StandardMaterial();
+  runwayLightMaterial.diffuse = new pc.Color(0.08, 0.01, 0.01);
+  runwayLightMaterial.emissive = new pc.Color(0.95, 0.09, 0.06);
+  runwayLightMaterial.emissiveIntensity = 3.8;
+  runwayLightMaterial.useLighting = false;
+  runwayLightMaterial.update();
   const sceneEffects = {
-    cubesSpinMultiplier: 0.55,
-    cubesVisible: 0,
     heartPulseBoost: 0.3,
     heartLightBoost: 0.25,
     heartFireflyVisibility: 0,
@@ -430,13 +568,17 @@ async function buildWorld() {
     orbitLightBoost: 0.35
   };
   const experienceState = {
-    room0Cubes: [],
     introDoorLights: [],
+    introDoorLightRig: null,
+    introDoorLightEntities: {},
     introDoorOccluder: null,
+    heartDoorOccluder: null,
     introOutlineMaterial: null,
     introOutlineEntities: [],
     heartCoreLight: null,
-    heartFireflies: []
+    heartFireflies: [],
+    heartRoomLightRig: null,
+    debugLightLabels: []
   };
   const lightRig = {
     ambient: 9.35,
@@ -447,142 +589,102 @@ async function buildWorld() {
     heartCore: 5.88,
     fireflies: 8.99,
     introDoors: 4.26,
-    heartSpotA: 5.02,
-    heartSpotB: 4.29,
-    heartSpotC: 5.12,
     cameraFovGlobal: 1,
     cameraFovHeart: 2.09,
-    rooms: [
-      { fill: 1.9, interior: 0.61, transition: 5.44 },
-      { fill: 0.5, interior: 8.37, transition: 4.8 },
-      { fill: 1, interior: 1, transition: 1 },
-      { fill: 1, interior: 1, transition: 1 }
-    ]
+    rooms: Array.from({ length: Math.max(...ROOM_DEFINITIONS.map((definition) => definition.id)) + 1 }, (_, roomId) => {
+      if (roomId === 0) return { fill: 1.9, interior: 0.61, transition: 5.44 };
+    if (roomId === 9) return { fill: 0.5, interior: 8.37, transition: 4.8 };
+      return { fill: 1, interior: 1, transition: 1 };
+    })
   };
   const debugUi = {
     panel: document.getElementById('debug-panel'),
     controls: document.getElementById('debug-controls'),
     pauseButton: document.getElementById('pause-rail-btn'),
     nextButton: document.getElementById('next-step-btn'),
+    performanceButton: document.getElementById('performance-mode-btn'),
     copyButton: document.getElementById('copy-debug-btn'),
+    copyHeartLightJsonButton: document.getElementById('copy-heart-light-json-btn'),
     toggleButton: document.getElementById('toggle-debug-btn'),
+    room0LightDebug: document.getElementById('room0-light-debug'),
+    heartLightDebug: document.getElementById('heart-light-debug'),
+    lightLabelOverlay: document.getElementById('debug-light-label-overlay'),
     overlay: document.getElementById('debug-json-overlay'),
     cameraDebug: document.getElementById('camera-debug'),
-    roomsDebug: document.getElementById('rooms-debug'),
-    globalAccordion: document.querySelector('details[data-scope="global"]'),
-    roomAccordions: Array.from(document.querySelectorAll('.room-accordion details[data-room-id]'))
+    roomsDebug: document.getElementById('rooms-debug')
   };
   let debugUiVisible = false;
   const roomRuntime = [];
+  const performanceState = {
+    enabled: false
+  };
 
   const manager = createExperienceManager(app, lightRig);
 
-  const roomTriggers = [];
-
   rooms.forEach((room, i) => {
+    const roomDefinition = ROOM_DEFINITIONS[i];
+    const doorConfig = roomDefinition.door;
+    const triggerConfig = roomDefinition.trigger;
+    const doorZ = room.backWallZ + doorConfig.backWallOffset;
     const doorRoot = new pc.Entity(`door-root-${i}`);
-    doorRoot.setPosition(0, 1.2, room.zCenter - 5.85);
-    if (i === 0) {
-      doorRoot.setPosition(0, -3.4, room.zCenter - 5.85);
-    }
+    doorRoot.setPosition(0, 1.2, doorZ);
+    doorRoot.setPosition(0, doorConfig.initialRootY, doorZ);
     app.root.addChild(doorRoot);
     let managedRoomLights = [];
 
-    const panelHalf = 0.45;
-    const doorGap = 0.02;
+    const panelHalf = doorConfig.panelHalf;
+    const doorGap = doorConfig.gap;
     const panelWidth = panelHalf * 2;
+    let runwayGuides = [];
 
     const leftCenter = -panelHalf - (doorGap / 2);
     const rightCenter = panelHalf + (doorGap / 2);
 
     const left = createDoor(app, {
-      name: `left-curtain-${i}`,
-      containerAsset: curtainsGlb,
+      name: `left-door-${i}`,
+      containerAsset: doorGlb,
       root: doorRoot,
       localPos: new pc.Vec3(leftCenter, 0, 0),
-      mode: 'slide',
-      openOffset: new pc.Vec3(-1.15, 0, 0),
+      pivotPos: new pc.Vec3(leftCenter - panelHalf, 0, 0),
+      openYaw: 88,
       color: new pc.Color(0.8, 0.03, 0.03),
-      rotation: new pc.Vec3(0, 90, 0),
-      localScale: new pc.Vec3(1.2, 1.4, 1.2),
+      rotation: new pc.Vec3(0, 0, 0),
       panelWidth,
-      speed: 1.8
+      speed: doorConfig.speed
     });
 
     const right = createDoor(app, {
-      name: `right-curtain-${i}`,
-      containerAsset: curtainsGlb,
+      name: `right-door-${i}`,
+      containerAsset: doorGlb,
       root: doorRoot,
       localPos: new pc.Vec3(rightCenter, 0, 0),
-      mode: 'slide',
-      openOffset: new pc.Vec3(1.15, 0, 0),
+      pivotPos: new pc.Vec3(rightCenter + panelHalf, 0, 0),
+      openYaw: -88,
       color: new pc.Color(0.8, 0.03, 0.03),
-      rotation: new pc.Vec3(0, -90, 0),
-      localScale: new pc.Vec3(1.2, 1.4, 1.2),
+      rotation: new pc.Vec3(0, 0, 0),
       panelWidth,
-      speed: 1.8
+      speed: doorConfig.speed
     });
 
     // Aggiungi modelli specifici per ogni stanza
-    switch (i) {
-      // prima stanza
-      case 0:
-        // Stanza 0: 10 cubi traslucenti grigi distribuiti che ruotano velocemente
-        const centerZ = room.zCenter; // Centro della stanza zero (z=12)
-        const centerX = 0; // Centro della stanza
-        const cubeSpacing = 1.2; // Spazio tra i cubi
-        const numCubes = 10;
-        const cubes = [];
-
-        for (let j = 0; j < numCubes; j++) {
-          const cube = new pc.Entity(`rotating-cube-${i}-${j}`);
-          cube.addComponent('render', { type: 'box' });
-          cube.setLocalScale(0.8, 0.8, 0.8);
-          // Distribuzione circolare
-          const angle = (j / numCubes) * Math.PI * 2;
-          const radius = 3;
-          const x = centerX + radius * Math.cos(angle);
-          const z = centerZ + radius * Math.sin(angle);
-          const y = 1.5 + Math.sin(j * 0.5) * 0.5; // Variazione altezza
-          cube.setPosition(x, y, z);
-          cube.render.material = translucentGrayMaterial;
-          cube.render.castShadows = true;
-          cube.render.receiveShadows = true;
-          room.addObject(cube);
-          cubes.push(cube);
-          experienceState.room0Cubes.push(cube);
-
-          if (j === 0) {
-            console.log('%c[CUBES] Configurazione (primo cubo):', 'color: #0f0; font-weight: bold;');
-            console.log(`Position[${j}]: new pc.Vec3(${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)})`);
-            console.log("Scale: new pc.Vec3(0.8, 0.8, 0.8)");
-            console.log(`(Totale: ${numCubes} cubi distribuiti circolarmente)`);
-          }
-
-          // Rotazione automatica veloce in direzioni diverse
-          app.on('update', (dt) => {
-            cube.enabled = sceneEffects.cubesVisible > 0.5;
-            const rotationSpeed = (2.0 + j * 0.3) * sceneEffects.cubesSpinMultiplier; // Velocità variabile
-            const rotationAxis = j % 3; // Asse di rotazione diverso
-            if (rotationAxis === 0) {
-              cube.rotateLocal(rotationSpeed * dt, 0, 0);
-            } else if (rotationAxis === 1) {
-              cube.rotateLocal(0, rotationSpeed * dt, 0);
-            } else {
-              cube.rotateLocal(0, 0, rotationSpeed * dt);
-            }
-          });
-        }
+    switch (roomDefinition.kind) {
+      case 'intro':
+        // Stanza 0: spazio pulito con corsie luminose da terra.
+        runwayGuides = addRunwayGuideLights(room);
         break;
 
-      // seconda stanza
-      case 1:
+      case 'heart':
         // Stanza 1: cuore pulsante con sciame di lucciole rosse.
         const heartBasePosition = new pc.Vec3(0, 1.8, room.zCenter - 2.0);
+        const heartFocusPosition = new pc.Vec3(0, 1.84, room.zCenter - 2.0);
+        const heartDoorFrontZ = room.zCenter + room.size.depth * 0.5 - 1.1;
+        const cornerX = room.size.width * 0.5 - 0.75;
+        const ceilingY = 3.72;
+        const floorY = 0.03;
         const heartBaseScale = 0.22;
-        const fireflyCount = 50;
+        const fireflyCount = 100;
         const heart = instantiateModel(
-          testModels.helmet,
+          visibleModels.heart,
           heartBasePosition.clone(),
           new pc.Vec3(heartBaseScale, heartBaseScale, heartBaseScale),
           new pc.Vec3(-90, 0, 0)
@@ -601,66 +703,36 @@ async function buildWorld() {
         heart.addChild(heartCoreLight);
         experienceState.heartCoreLight = heartCoreLight;
 
-        const heartSpotLightA = new pc.Entity('heart-spot-light-a');
-        heartSpotLightA.addComponent('light', {
-          type: 'spot',
-          color: new pc.Color(1.0, 0.28, 0.24),
-          intensity: 1.2,
-          innerConeAngle: 22,
-          outerConeAngle: 40,
-          range: 12,
-          castShadows: false
-        });
-        app.root.addChild(heartSpotLightA);
-
-        const heartSpotLightB = new pc.Entity('heart-spot-light-b');
-        heartSpotLightB.addComponent('light', {
-          type: 'spot',
-          color: new pc.Color(0.9, 0.16, 0.2),
-          intensity: 1.0,
-          innerConeAngle: 18,
-          outerConeAngle: 36,
-          range: 11,
-          castShadows: false
-        });
-        app.root.addChild(heartSpotLightB);
-
-        const heartSpotLightC = new pc.Entity('heart-spot-light-c');
-        heartSpotLightC.addComponent('light', {
-          type: 'spot',
-          color: new pc.Color(1.0, 0.1, 0.1),
-          intensity: 0.9,
-          innerConeAngle: 18,
-          outerConeAngle: 34,
-          range: 13,
-          castShadows: false
-        });
-        app.root.addChild(heartSpotLightC);
-
         for (let j = 0; j < fireflyCount; j++) {
           const firefly = new pc.Entity(`heart-firefly-${j}`);
           firefly.addComponent('render', { type: 'sphere' });
-          firefly.addComponent('light', {
-            type: 'omni',
-            color: new pc.Color(1.0, 0.08, 0.08),
-            intensity: 0,
-            range: 0.9,
-            castShadows: false
-          });
-          firefly.setLocalScale(0.022, 0.022, 0.022);
+          const useDynamicLight = j % 4 === 0;
+          if (useDynamicLight) {
+            firefly.addComponent('light', {
+              type: 'omni',
+              color: new pc.Color(1.0, 0.08, 0.08),
+              intensity: 0,
+              range: 0.9,
+              castShadows: false
+            });
+          }
+          firefly.setLocalScale(0.014, 0.014, 0.014);
           firefly.render.material = fireflyMaterial;
           firefly.enabled = false;
           room.addObject(firefly);
 
           experienceState.heartFireflies.push({
             entity: firefly,
+            useDynamicLight,
             phase: (j / fireflyCount) * Math.PI * 2,
             radius: 0.75 + (j % 5) * 0.14,
-            height: 0.16 + ((j * 17) % 10) * 0.06,
-            speed: 0.28 + (j % 7) * 0.045,
-            wobble: 0.05 + (j % 4) * 0.018,
+            height: -1.35 + ((j * 17) % 14) * 0.26,
+            speed: 0.38 + (j % 7) * 0.06,
+            wobble: 0.08 + (j % 4) * 0.03,
             flickerPhase: Math.random() * Math.PI * 2,
-            flickerSpeed: 1.3 + (j % 6) * 0.25
+            flickerSpeed: 1.6 + (j % 6) * 0.35,
+            tilt: Math.random() * Math.PI * 2,
+            orbitNoise: 0.12 + Math.random() * 0.16
           });
         }
 
@@ -682,233 +754,198 @@ async function buildWorld() {
           heartCoreLight.light.intensity = (0.02 + pulse * (0.06 + sceneEffects.heartLightBoost * 0.07)) * lightRig.heartCore;
           heartCoreLight.light.range = 0.95 + pulse * (0.18 + sceneEffects.heartLightBoost * 0.2);
 
-          heartSpotLightA.setPosition(1.15, heartBasePosition.y + 0.8, room.zCenter - 0.35);
-          heartSpotLightA.lookAt(heart.getPosition());
-          heartSpotLightA.light.intensity = (0.45 + pulse * 1.1) * lightRig.heartSpotA;
-
-          heartSpotLightB.setPosition(-1.05, heartBasePosition.y + 0.4, room.zCenter - 0.75);
-          heartSpotLightB.lookAt(heart.getPosition());
-          heartSpotLightB.light.intensity = (0.36 + pulse * 0.9) * lightRig.heartSpotB;
-
-          heartSpotLightC.setPosition(0.0, heartBasePosition.y + 0.55, room.zCenter - 3.25);
-          heartSpotLightC.lookAt(heart.getPosition());
-          heartSpotLightC.light.intensity = (0.28 + pulse * 0.75) * lightRig.heartSpotC;
-
           experienceState.heartFireflies.forEach((firefly, index) => {
-            const speed = (0.06 + sceneEffects.heartFireflySpeed) * firefly.speed;
+            const speed = (0.1 + sceneEffects.heartFireflySpeed) * firefly.speed;
             const orbit = timeSeconds * speed + firefly.phase;
-            const radius = firefly.radius + Math.sin(orbit * 1.4 + index) * 0.08;
-            const x = heartBasePosition.x + Math.cos(orbit) * radius;
-            const z = heartBasePosition.z + Math.sin(orbit * 1.15) * (radius * 0.72);
-            const y = heartBasePosition.y + firefly.height + Math.sin(orbit * 2.1) * firefly.wobble;
+            const radius = firefly.radius + Math.sin(orbit * 1.4 + index) * firefly.orbitNoise;
+            const swirl = orbit + Math.sin(orbit * 0.65 + firefly.tilt) * 0.35;
+            const x = heartBasePosition.x + Math.cos(swirl) * radius;
+            const z = heartBasePosition.z + Math.sin(swirl * 1.08 + firefly.tilt * 0.4) * (radius * 0.78);
+            const y = heartBasePosition.y + firefly.height + Math.sin(orbit * 2.4 + firefly.tilt) * firefly.wobble;
             const flicker = 0.72 + 0.28 * (Math.sin(timeSeconds * firefly.flickerSpeed + firefly.flickerPhase) * 0.5 + 0.5);
             firefly.entity.enabled = sceneEffects.heartFireflyVisibility > 0.05;
             firefly.entity.setPosition(x, y, z);
-            firefly.entity.light.intensity = sceneEffects.heartFireflyVisibility * (0.045 + pulse * 0.04) * flicker * lightRig.fireflies;
-            firefly.entity.light.range = 0.48 + sceneEffects.heartFireflyVisibility * (0.16 + 0.08 * flicker);
+            if (firefly.useDynamicLight && firefly.entity.light) {
+              firefly.entity.light.intensity = sceneEffects.heartFireflyVisibility * (0.06 + pulse * 0.05) * flicker * lightRig.fireflies;
+              firefly.entity.light.range = 0.42 + sceneEffects.heartFireflyVisibility * (0.14 + 0.08 * flicker);
+            }
           });
         });
         break;
 
-      // terza stanza
-      case 2:
-        // Stanza 2: camera antica sospesa nel buio.
-        const cameraModel = instantiateModel(testModels.camera, new pc.Vec3(-1.5, 0.25, room.zCenter - 2.5), new pc.Vec3(0.25, 0.25, 0.25), new pc.Vec3(0, 35, 0));
-        room.addObject(cameraModel);
-        app.on('update', (dt) => {
-          cameraModel.rotateLocal(0, 10 * dt, 0);
-        });
-        break;
-
-      // quarta stanza
-      case 3:
-        // Stanza 3: Remains (modello principale più piccolo) più basso sul pavimento e più verso sinistra, con luci orbitanti ellittiche
-        const remains = instantiateModel(testModels.remains, new pc.Vec3(-2, 0.1, room.zCenter - 3), new pc.Vec3(0.5, 0.5, 0.5), new pc.Vec3(-90, 0, 0));
-        room.addObject(remains);
-        console.log('%c[REMAINS] Configurazione:', 'color: #ff0; font-weight: bold;');
-        console.log("Position: new pc.Vec3(-2, 0.1, room.zCenter - 3)");
-        console.log("Scale: new pc.Vec3(0.5, 0.5, 0.5)");
-        console.log("Rotation: new pc.Vec3(-90, 0, 0)");
-        console.log('%c[REMAINS] Posizione attuale:', 'color: #ff0; font-weight: bold;');
-        console.log(remains.getPosition());
-
-        // Disabilita le luci del modello GLB stesso
-        function disableLightsRecursive(entity) {
-          if (entity.light) {
-            entity.light.enabled = false;
-          }
-          entity.children.forEach(child => disableLightsRecursive(child));
-        }
-        disableLightsRecursive(remains);
-
-        // Funzione globale per ruotare remains da console
-        window.rotateRemains = (x = 0, y = 0, z = 0) => {
-          const currentRotation = remains.getLocalEulerAngles();
-          remains.setLocalEulerAngles(currentRotation.x + x, currentRotation.y + y, currentRotation.z + z);
-          const newRotation = remains.getLocalEulerAngles();
-          console.log(`%c[REMAINS] Rotazione aggiornata:`, 'color: #ff0; font-weight: bold;');
-          console.log(`new pc.Vec3(${newRotation.x.toFixed(2)}, ${newRotation.y.toFixed(2)}, ${newRotation.z.toFixed(2)})`);
-        };
-
-        // Funzione per settare rotazione assoluta
-        window.setRemainsRotation = (x, y, z) => {
-          remains.setLocalEulerAngles(x, y, z);
-          const newRotation = remains.getLocalEulerAngles();
-          console.log(`%c[REMAINS] Rotazione settata a:`, 'color: #ff0; font-weight: bold;');
-          console.log(`new pc.Vec3(${newRotation.x.toFixed(2)}, ${newRotation.y.toFixed(2)}, ${newRotation.z.toFixed(2)})`);
-        };
-
-        console.log('%c[CONSOLE] Comandi disponibili:', 'color: #0ff; font-weight: bold;');
-        console.log('rotateRemains(x, y, z) - Ruota di X gradi su ogni asse');
-        console.log('setRemainsRotation(x, y, z) - Setta rotazione assoluta');
-
-        // 5 piccole luci bianche che orbitano ellitticamente al centro
-        const orbitingLights = [];
-        for (let j = 0; j < 5; j++) {
-          const light = new pc.Entity(`orbit-light-${i}-${j}`);
-          light.addComponent('light', {
-            type: 'omni',
-            color: new pc.Color(1.0, 1.0, 1.0), // Bianco
-            intensity: 0.3, // Piccole luci
-            range: 4,
-            castShadows: false
-          });
-          // Posizione iniziale ellittica
-          const angle = (j / 5) * Math.PI * 2;
-          const ellipseX = 1.5 * Math.cos(angle);
-          const ellipseZ = 0.8 * Math.sin(angle);
-          light.setPosition(ellipseX, 1.5, room.zCenter - 3 + ellipseZ);
-          app.root.addChild(light);
-          orbitingLights.push(light);
-        }
-
-        // Animazione orbitale ellittica
-        app.on('update', (dt) => {
-          orbitingLights.forEach((light, j) => {
-            const speed = 2000 - sceneEffects.orbitLightBoost * 650;
-            const time = performance.now() / speed + j * Math.PI / 2.5; // Velocità diversa per ogni luce
-            const ellipseX = 1.5 * Math.cos(time);
-            const ellipseZ = 0.8 * Math.sin(time);
-            light.setPosition(ellipseX, 1.5, room.zCenter - 3 + ellipseZ);
-            light.light.intensity = 0.15 + sceneEffects.orbitLightBoost * 0.45;
-            light.light.range = 3.3 + sceneEffects.orbitLightBoost * 1.2;
-          });
-        });
+      case 'tunnel':
+        // Stanza tunnel: volutamente vuota, usata solo per la corsa veloce.
+        runwayGuides = addRunwayGuideLights(room);
         break;
     }
 
-    // Luci specifiche per stanza
-    if (i === 0) {
-      // Prima stanza: nessuna luce ambiente dedicata, si vedono solo le porte.
-    } else if (i === 1) {
-      // Seconda stanza: niente luce di stanza, solo cuore e lucciole.
-    } else if (i === 2) {
-      // Terza stanza: poco illuminata, solo le luci orbitanti
-      // Rimossa la luce emissiva precedente
-    }
+    const lightConfig = roomDefinition.light ?? DEFAULT_ROOM_LIGHT_CONFIG;
 
     const softFillLight = new pc.Entity(`soft-fill-light-${i}`);
     softFillLight.addComponent('light', {
       type: 'omni',
-      color: i === 1 ? new pc.Color(0.42, 0.12, 0.12) : new pc.Color(0.24, 0.24, 0.28),
+      color: lightConfig.softFill.color,
       intensity: 0,
-      range: i === 0 ? 7.5 : 6.5,
+      range: lightConfig.softFill.range,
       castShadows: false
     });
-    softFillLight.setPosition(0, 1.85, room.zCenter - 2.8);
+    softFillLight.setPosition(
+      lightConfig.softFill.positionOffset.x,
+      lightConfig.softFill.positionOffset.y,
+      room.zCenter + lightConfig.softFill.positionOffset.z
+    );
     app.root.addChild(softFillLight);
     managedRoomLights.push(softFillLight);
 
     const interiorLight = new pc.Entity(`interior-light-${i}`);
     interiorLight.addComponent('light', {
       type: 'spot',
-      color: new pc.Color(1.0, 0.45, 0.35),
+      color: lightConfig.interior.color,
       intensity: 0,
-      innerConeAngle: 28,
-      outerConeAngle: 52,
-      range: 12,
-      castShadows: !isMobile,
-      shadowResolution: isMobile ? 512 : 1024
+      innerConeAngle: lightConfig.interior.innerConeAngle,
+      outerConeAngle: lightConfig.interior.outerConeAngle,
+      range: lightConfig.interior.range,
+      castShadows: lightConfig.interior.castShadows,
+      shadowResolution: lightConfig.interior.shadowResolution
     });
-    interiorLight.setPosition(0, 2.3, room.zCenter - 3.5);
-    interiorLight.setEulerAngles(90, 0, 0);
+    interiorLight.setPosition(
+      lightConfig.interior.positionOffset.x,
+      lightConfig.interior.positionOffset.y,
+      room.zCenter + lightConfig.interior.positionOffset.z
+    );
+    interiorLight.setEulerAngles(
+      lightConfig.interior.euler.x,
+      lightConfig.interior.euler.y,
+      lightConfig.interior.euler.z
+    );
     app.root.addChild(interiorLight);
 
     // Luce di transizione per far intravedere il nuovo spazio
     const transitionLight = new pc.Entity(`transition-light-${i}`);
     transitionLight.addComponent('light', {
       type: 'spot',
-      color: new pc.Color(0.8, 0.8, 1.0),
+      color: lightConfig.transition.color,
       intensity: 0,
-      innerConeAngle: 45,
-      outerConeAngle: 60,
-      range: 15,
-      castShadows: false
+      innerConeAngle: lightConfig.transition.innerConeAngle,
+      outerConeAngle: lightConfig.transition.outerConeAngle,
+      range: lightConfig.transition.range,
+      castShadows: lightConfig.transition.castShadows
     });
-    transitionLight.setPosition(0, 3, room.zCenter - 2);
-    transitionLight.setEulerAngles(90, 0, 0);
+    transitionLight.setPosition(
+      lightConfig.transition.positionOffset.x,
+      lightConfig.transition.positionOffset.y,
+      room.zCenter + lightConfig.transition.positionOffset.z
+    );
+    transitionLight.setEulerAngles(
+      lightConfig.transition.euler.x,
+      lightConfig.transition.euler.y,
+      lightConfig.transition.euler.z
+    );
     app.root.addChild(transitionLight);
 
     manager.addRoom({
-      id: i,
+      id: roomDefinition.id,
       zCenter: room.zCenter,
       doors: [left, right],
       interiorLight,
       transitionLight,
-      lowLight: i === 1,
-      disableBaseLights: false,
+      lowLight: lightConfig.lowLight,
+      disableBaseLights: lightConfig.disableBaseLights,
       roomLights: managedRoomLights
     });
 
     roomRuntime.push({
-      id: i,
+      id: roomDefinition.id,
+      config: roomDefinition,
       room,
       doorRoot,
       doors: [left, right],
       softFillLight,
       interiorLight,
       transitionLight,
-      roomLights: managedRoomLights
+      roomLights: managedRoomLights,
+      runwayGuides
     });
 
-    const trigger = createTrigger(app, {
-      name: `trigger-${i}`,
-      center: new pc.Vec3(0, 1.5, room.zCenter - 3),
-      halfExtents: new pc.Vec3(2.5, 1.7, 2.5),
-      onEnter: () => manager.onRoomEnter(i)
-    });
-    app.root.addChild(trigger.entity);
-    roomTriggers.push(trigger);
   });
 
-  const roomZeroRuntime = roomRuntime[0];
-  const heartRoomRuntime = roomRuntime[1];
-  const introDoorHiddenY = -5.8;
+  const roomZeroRuntime = roomRuntime.find((roomState) => roomState.id === 0);
+  const heartRoomRuntime = roomRuntime.find((roomState) => roomState.id === 9);
+  const tunnelRuntimes = roomRuntime.filter((roomState) => ROOM_DEFINITIONS.find((definition) => definition.id === roomState.id)?.kind === 'tunnel');
+  experienceState.heartRoomLightRig = {
+    interior: {
+      position: new pc.Vec3(0, 2.3, -95),
+      rotation: new pc.Vec3(87.8, -1.9, -4.5),
+      intensity: 0.5
+    },
+    transition: {
+      position: new pc.Vec3(-5.66, 0.47, -120),
+      rotation: new pc.Vec3(-180, -180, -180),
+      intensity: 0
+    }
+  };
+  heartRoomRuntime.interiorLight.setPosition(experienceState.heartRoomLightRig.interior.position);
+  heartRoomRuntime.interiorLight.setEulerAngles(experienceState.heartRoomLightRig.interior.rotation);
+  heartRoomRuntime.transitionLight.setPosition(experienceState.heartRoomLightRig.transition.position);
+  heartRoomRuntime.transitionLight.setEulerAngles(experienceState.heartRoomLightRig.transition.rotation);
+  experienceState.debugLightLabels.push(
+    { label: 'CUORE INT', entity: heartRoomRuntime.interiorLight },
+    { label: 'CUORE TRANS', entity: heartRoomRuntime.transitionLight }
+  );
+  const introDoorHiddenY = 1.2;//non lo cambiare lo voglio cosi'
   const introDoorVisibleY = 1.2;
 
   const leftDoorLight = new pc.Entity('intro-door-light-left');
   leftDoorLight.addComponent('light', {
-    type: 'omni',
+    type: 'spot',
     color: new pc.Color(1.0, 0.32, 0.18),
     intensity: 0,
+    innerConeAngle: 22,
+    outerConeAngle: 42,
     range: 5.5,
     castShadows: false
   });
   leftDoorLight.setPosition(-1.2, 1.7, 6.35);
+  aimSpotAt(leftDoorLight, new pc.Vec3(-0.65, 0.06, roomZeroRuntime.room.backWallZ + 0.95));
   app.root.addChild(leftDoorLight);
   experienceState.introDoorLights.push(leftDoorLight);
 
   const rightDoorLight = new pc.Entity('intro-door-light-right');
   rightDoorLight.addComponent('light', {
-    type: 'omni',
+    type: 'spot',
     color: new pc.Color(1.0, 0.32, 0.18),
     intensity: 0,
+    innerConeAngle: 22,
+    outerConeAngle: 42,
     range: 5.5,
     castShadows: false
   });
   rightDoorLight.setPosition(1.2, 1.7, 6.35);
+  aimSpotAt(rightDoorLight, new pc.Vec3(0.65, 0.06, roomZeroRuntime.room.backWallZ + 0.95));
   app.root.addChild(rightDoorLight);
   experienceState.introDoorLights.push(rightDoorLight);
+  experienceState.introDoorLightEntities = {
+    left: leftDoorLight,
+    right: rightDoorLight
+  };
+  experienceState.introDoorLightRig = {
+    left: {
+      position: new pc.Vec3(-1.2, 1.7, 6.35),
+      rotation: cloneEuler(leftDoorLight),
+      intensity: 1,
+      range: 5.5
+    },
+    right: {
+      position: new pc.Vec3(1.2, 1.7, 6.35),
+      rotation: cloneEuler(rightDoorLight),
+      intensity: 1,
+      range: 5.5
+    }
+  };
+  experienceState.debugLightLabels.push(
+    { label: 'STANZA 0 L', entity: leftDoorLight },
+    { label: 'STANZA 0 R', entity: rightDoorLight }
+  );
 
   const introOccluderMaterial = new pc.StandardMaterial();
   introOccluderMaterial.diffuse = new pc.Color(0, 0, 0);
@@ -933,6 +970,17 @@ async function buildWorld() {
   introDoorOccluder.render.receiveShadows = false;
   app.root.addChild(introDoorOccluder);
   experienceState.introDoorOccluder = introDoorOccluder;
+
+  const heartDoorOccluder = new pc.Entity('heart-door-occluder');
+  heartDoorOccluder.addComponent('render', { type: 'box' });
+  heartDoorOccluder.setLocalScale(heartRoomRuntime.room.doorWidth, heartRoomRuntime.room.doorHeight, 0.28);
+  heartDoorOccluder.setPosition(0, heartRoomRuntime.room.doorHeight / 2, heartRoomRuntime.room.backWallZ + 0.08);
+  heartDoorOccluder.render.material = introOccluderMaterial;
+  heartDoorOccluder.render.castShadows = false;
+  heartDoorOccluder.render.receiveShadows = false;
+  heartDoorOccluder.enabled = false;
+  app.root.addChild(heartDoorOccluder);
+  experienceState.heartDoorOccluder = heartDoorOccluder;
 
   function addIntroOutline(name, position, scale) {
     const edge = new pc.Entity(name);
@@ -985,12 +1033,228 @@ async function buildWorld() {
     return pc.math.clamp(baseFov * lightRig.cameraFovGlobal * lightRig.cameraFovHeart, 20, 120);
   }
 
-  function getHeartSpotLiveState() {
+  function aimSpotAt(lightEntity, targetPosition) {
+    lightEntity.lookAt(targetPosition);
+    lightEntity.rotateLocal(90, 0, 0);
+  }
+
+  function setDoorGroupColor(roomState, color) {
+    roomState.doors.forEach((door) => door.setColor?.(color));
+  }
+
+  function setDoorGroupOpacity(roomState, opacity) {
+    roomState.doors.forEach((door) => door.setOpacity?.(opacity));
+  }
+
+  function setDoorRootToBackWall(roomState, y) {
+    roomState.doorRoot.setPosition(0, y, roomState.room.backWallZ + (roomState.config?.door?.backWallOffset ?? 0.15));
+  }
+
+  function darkenRoomStructure(roomState, color = new pc.Color(0.06, 0.06, 0.07)) {
+    roomState.room.structureEntities.forEach((entity) => {
+      if (!entity.render?.material) return;
+      if (!entity._darkRoomMaterial) {
+        entity.render.material = entity.render.material.clone();
+        entity._darkRoomMaterial = true;
+      }
+      entity.render.material.diffuse.copy(color);
+      entity.render.material.gloss = 0.18;
+      entity.render.material.metalness = 0.04;
+      entity.render.material.update();
+    });
+  }
+
+  function getRoomSequenceLabel(roomId) {
+    const roomState = roomRuntime.find((room) => room.id === roomId);
+    const sequenceNumber = roomState?.config?.sequenceNumber ?? roomId;
+    return `Stanza ${sequenceNumber}`;
+  }
+
+  function vec3ToPlain(vec3) {
     return {
-      heartSpotA: Number(app.root.findByName('heart-spot-light-a')?.light?.intensity ?? 0),
-      heartSpotB: Number(app.root.findByName('heart-spot-light-b')?.light?.intensity ?? 0),
-      heartSpotC: Number(app.root.findByName('heart-spot-light-c')?.light?.intensity ?? 0)
+      x: Number(vec3.x.toFixed(3)),
+      y: Number(vec3.y.toFixed(3)),
+      z: Number(vec3.z.toFixed(3))
     };
+  }
+
+  function cloneEuler(entity) {
+    const euler = entity.getEulerAngles();
+    return new pc.Vec3(euler.x, euler.y, euler.z);
+  }
+
+  function applyVec3Values(targetVec3, source) {
+    if (!source) return;
+    targetVec3.set(
+      Number(source.x ?? targetVec3.x),
+      Number(source.y ?? targetVec3.y),
+      Number(source.z ?? targetVec3.z)
+    );
+  }
+
+  function getRoom0LightPayload() {
+    return {
+      left: {
+        position: vec3ToPlain(experienceState.introDoorLightRig.left.position),
+        rotation: vec3ToPlain(experienceState.introDoorLightRig.left.rotation),
+        intensity: Number(experienceState.introDoorLightRig.left.intensity.toFixed(3))
+      },
+      right: {
+        position: vec3ToPlain(experienceState.introDoorLightRig.right.position),
+        rotation: vec3ToPlain(experienceState.introDoorLightRig.right.rotation),
+        intensity: Number(experienceState.introDoorLightRig.right.intensity.toFixed(3))
+      }
+    };
+  }
+
+  function getHeartRoomLightPayload() {
+    return {
+      interior: {
+        position: vec3ToPlain(experienceState.heartRoomLightRig.interior.position),
+        rotation: vec3ToPlain(experienceState.heartRoomLightRig.interior.rotation),
+        intensity: Number(experienceState.heartRoomLightRig.interior.intensity.toFixed(3))
+      },
+      transition: {
+        position: vec3ToPlain(experienceState.heartRoomLightRig.transition.position),
+        rotation: vec3ToPlain(experienceState.heartRoomLightRig.transition.rotation),
+        intensity: Number(experienceState.heartRoomLightRig.transition.intensity.toFixed(3))
+      }
+    };
+  }
+
+  function bindRigSlider(sliderId, valueId, target, axisOrKey) {
+    const slider = document.getElementById(sliderId);
+    const value = document.getElementById(valueId);
+    if (!slider || !value || !target) return;
+
+    const syncFromTarget = () => {
+      const currentValue = axisOrKey === 'intensity'
+        ? target.intensity
+        : target[axisOrKey.includes('rotation.') ? 'rotation' : 'position'][axisOrKey.split('.')[1]];
+      slider.value = String(currentValue);
+      value.textContent = Number(currentValue).toFixed(2);
+    };
+
+    slider.addEventListener('input', () => {
+      const numericValue = Number(slider.value);
+      if (axisOrKey === 'intensity') {
+        target.intensity = numericValue;
+      } else {
+        const [group, axis] = axisOrKey.split('.');
+        target[group][axis] = numericValue;
+      }
+      value.textContent = numericValue.toFixed(2);
+    });
+
+    syncFromTarget();
+  }
+
+  function applyPerformanceMode(enabled) {
+    performanceState.enabled = enabled;
+    directional.light.castShadows = !enabled;
+    directional.light.shadowDistance = enabled ? 16 : (isMobile ? 22 : 34);
+    directional.light.shadowResolution = enabled ? 256 : (isMobile ? 512 : 1024);
+
+    roomRuntime.forEach((roomState) => {
+      if (roomState.interiorLight?.light) {
+        roomState.interiorLight.light.castShadows = !enabled && !isMobile;
+        roomState.interiorLight.light.shadowResolution = enabled ? 256 : (isMobile ? 512 : 1024);
+      }
+    });
+
+    if (debugUi.performanceButton) {
+      debugUi.performanceButton.textContent = enabled ? 'Performance: ON' : 'Performance: OFF';
+    }
+  }
+
+  function addRunwayGuideLights(room) {
+    const guideCountPerSide = 8;
+    const laneX = 2.15;
+    const startZ = room.zCenter + room.size.depth / 2 - 2.2;
+    const stepZ = 2.65;
+    const guides = [];
+
+    for (let side = -1; side <= 1; side += 2) {
+      for (let index = 0; index < guideCountPerSide; index++) {
+        const guide = new pc.Entity(`runway-light-${side}-${index}`);
+        guide.addComponent('render', { type: 'cylinder' });
+        guide.setLocalScale(0.16, 0.04, 0.16);
+        guide.setPosition(side * laneX, 0.03, startZ - index * stepZ);
+        const guideMaterial = runwayLightMaterial.clone();
+        guideMaterial.update();
+        guide.render.material = guideMaterial;
+        guide.render.castShadows = false;
+        guide.render.receiveShadows = false;
+        guide._runwayMaterial = guideMaterial;
+        guide._runwayBaseScaleY = 0.04;
+        guide._runwayPulseOffset = index * 0.22 + (side > 0 ? 0.35 : 0);
+        room.addObject(guide);
+        guides.push(guide);
+      }
+    }
+
+    return guides;
+  }
+
+  function setRunwayGuidePulse(roomState, pulseAmount, timeSeconds = 0) {
+    if (!roomState?.runwayGuides?.length) return;
+
+    roomState.runwayGuides.forEach((guide) => {
+      const wave = 0.5 + 0.5 * Math.sin(timeSeconds * 8 + guide._runwayPulseOffset);
+      const intensity = 3.8 + pulseAmount * (1.6 + wave * 1.8);
+      guide._runwayMaterial.emissiveIntensity = intensity;
+      guide._runwayMaterial.update();
+
+      const scaleY = guide._runwayBaseScaleY + pulseAmount * (0.01 + wave * 0.02);
+      guide.setLocalScale(0.16, scaleY, 0.16);
+    });
+  }
+
+  function getTunnelRouteProgress(tunnelIndex, movementProgress, includeHeartApproach = false) {
+    const totalSegments = tunnelRuntimes.length + 1;
+    const baseIndex = includeHeartApproach ? tunnelRuntimes.length : tunnelIndex;
+    return pc.math.clamp((baseIndex + movementProgress) / totalSegments, 0, 1);
+  }
+
+  function getTunnelRush(globalProgress) {
+    return 0.18 + Math.sin(globalProgress * Math.PI) * 0.82;
+  }
+
+  function setDebugLightLabels() {
+    if (!debugUi.lightLabelOverlay) return;
+    debugUi.lightLabelOverlay.innerHTML = '';
+    experienceState.debugLightLabels.forEach((labelConfig) => {
+      const label = document.createElement('div');
+      label.className = 'debug-light-label';
+      label.textContent = labelConfig.label;
+      debugUi.lightLabelOverlay.appendChild(label);
+      labelConfig.element = label;
+    });
+  }
+
+  function updateDebugLightLabels() {
+    if (!debugUi.lightLabelOverlay) return;
+
+    if (!debugMode.active || !experienceState.debugLightLabels.length) {
+      debugUi.lightLabelOverlay.style.display = 'none';
+      return;
+    }
+
+    debugUi.lightLabelOverlay.style.display = 'block';
+    experienceState.debugLightLabels.forEach((labelConfig) => {
+      if (!labelConfig.entity?.enabled || !labelConfig.element) {
+        if (labelConfig.element) labelConfig.element.style.display = 'none';
+        return;
+      }
+
+      const worldPos = labelConfig.entity.getPosition();
+      const screenPos = camera.camera.worldToScreen(worldPos);
+      const isVisible = screenPos.z > 0;
+      labelConfig.element.style.display = isVisible ? 'block' : 'none';
+      if (!isVisible) return;
+      labelConfig.element.style.left = `${screenPos.x}px`;
+      labelConfig.element.style.top = `${screenPos.y - 8}px`;
+    });
   }
 
   function applyPreStartLightPreview() {
@@ -998,6 +1262,9 @@ async function buildWorld() {
 
     ambient.light.intensity = 0.08 * lightRig.ambient;
     directional.light.intensity = 0.11 * lightRig.key;
+    setDoorRootToBackWall(roomZeroRuntime, introDoorHiddenY);
+    roomZeroRuntime.doors.forEach((door) => door.setOpen(true));
+    tunnelRuntimes.forEach((roomState) => roomState.doors.forEach((door) => door.setOpen(true)));
 
     roomRuntime.forEach((roomState) => {
       const roomRig = getRoomRig(roomState.id);
@@ -1014,7 +1281,11 @@ async function buildWorld() {
   function setHeartRoomMood(elapsed) {
     const glow = easeInOut01(elapsed / 3.2);
     const room0Rig = getRoomRig(0);
-    const room1Rig = getRoomRig(1);
+    const room1Rig = getRoomRig(9);
+    heartRoomRuntime.interiorLight.setPosition(experienceState.heartRoomLightRig.interior.position);
+    heartRoomRuntime.interiorLight.setEulerAngles(experienceState.heartRoomLightRig.interior.rotation);
+    heartRoomRuntime.transitionLight.setPosition(experienceState.heartRoomLightRig.transition.position);
+    heartRoomRuntime.transitionLight.setEulerAngles(experienceState.heartRoomLightRig.transition.rotation);
     ambient.light.intensity = 0.001 * lightRig.ambient;
     directional.light.intensity = 0.0035 * lightRig.key;
     roomZeroRuntime.interiorLight.light.intensity = 0 * lightRig.interior * room0Rig.interior;
@@ -1024,19 +1295,18 @@ async function buildWorld() {
       light.light.intensity = 0 * lightRig.introDoors;
     });
 
-    heartRoomRuntime.interiorLight.light.intensity = (0.04 + glow * 0.12) * lightRig.interior * room1Rig.interior;
-    heartRoomRuntime.transitionLight.light.intensity = (0.02 + glow * 0.07) * lightRig.transition * room1Rig.transition;
+    heartRoomRuntime.interiorLight.light.intensity = (0.09 + glow * 0.2) * lightRig.interior * room1Rig.interior * experienceState.heartRoomLightRig.interior.intensity;
+    heartRoomRuntime.transitionLight.light.intensity = (0.045 + glow * 0.12) * lightRig.transition * room1Rig.transition * experienceState.heartRoomLightRig.transition.intensity;
     setLightGroupIntensity(
       heartRoomRuntime.roomLights.filter((light) => light.name !== 'red-light'),
-      (0.02 + glow * 0.08) * lightRig.roomFill * room1Rig.fill
+      (0.05 + glow * 0.16) * lightRig.roomFill * room1Rig.fill
     );
 
-    sceneEffects.cubesVisible = 0;
-    sceneEffects.cubesSpinMultiplier = 0.08;
     sceneEffects.heartPulseBoost = 0.65 + glow * 0.55;
     sceneEffects.heartLightBoost = 0.2 + glow * 0.22;
     sceneEffects.heartFireflyVisibility = glow;
     sceneEffects.heartFireflySpeed = 0.1 + glow * 0.12;
+    bloomEffect.strength = 0.2 + glow * 0.55;
   }
 
   const railSequence = createRailSequence({
@@ -1053,26 +1323,26 @@ async function buildWorld() {
   railSequence.addStep({
     label: 'Prologo',
     roomId: 0,
-    position: new pc.Vec3(0, 1.75, 14.6),
+    position: new pc.Vec3(0, 1.75, 24.6),
     lookAt: new pc.Vec3(0, 1.7, 6.15),
-    dwell: 3.8,
-    moveSmoothing: 3.4,
+    dwell: 0.92,
+    moveSmoothing: 3.6,
     lookSmoothing: 4.5,
     onEnter: () => {
       const room0Rig = getRoomRig(0);
-      const room1Rig = getRoomRig(1);
-      sceneEffects.cubesVisible = 0;
-      sceneEffects.cubesSpinMultiplier = 0.05;
+      const room1Rig = getRoomRig(9);
       sceneEffects.heartFireflyVisibility = 0;
       sceneEffects.heartFireflySpeed = 0.08;
+      bloomEffect.strength = 0;
       ambient.light.intensity = 0 * lightRig.ambient;
       directional.light.intensity = 0 * lightRig.key;
       camera.camera.fov = getAdjustedFov(52);
       roomZeroRuntime.room.structureEntities.forEach((entity) => { entity.enabled = true; });
       experienceState.introOutlineEntities.forEach((entity) => { entity.enabled = true; });
       experienceState.introOutlineMaterial.emissiveIntensity = 0.035;
-      roomZeroRuntime.doorRoot.setPosition(0, introDoorHiddenY, roomZeroRuntime.room.zCenter - 5.85);
-      roomZeroRuntime.doors.forEach((door) => door.setOpen(false));
+      setDoorRootToBackWall(roomZeroRuntime, introDoorHiddenY);
+      roomZeroRuntime.doors.forEach((door) => door.setOpen(true));
+      tunnelRuntimes.forEach((roomState) => roomState.doors.forEach((door) => door.setOpen(true)));
       heartRoomRuntime.doors.forEach((door) => door.setOpen(true));
       roomZeroRuntime.interiorLight.light.intensity = 0 * lightRig.interior * room0Rig.interior;
       roomZeroRuntime.transitionLight.light.intensity = 0 * lightRig.transition * room0Rig.transition;
@@ -1085,15 +1355,16 @@ async function buildWorld() {
         light.light.range = 1.2;
       });
       experienceState.introDoorOccluder.enabled = true;
+      setCanvasTunnelEffect(0, 1);
     },
     onUpdate: ({ elapsed }) => {
       const room0Rig = getRoomRig(0);
-      const reveal = easeInOut01(elapsed / 2.0);
-      const doorRise = easeInOut01(Math.max(0, elapsed - 0.85) / 1.1);
-      roomZeroRuntime.doorRoot.setPosition(
-        0,
-        introDoorHiddenY + (introDoorVisibleY - introDoorHiddenY) * doorRise,
-        roomZeroRuntime.room.zCenter - 5.85
+      const reveal = easeInOut01(elapsed / 0.9);
+      const doorRise = easeInOut01(Math.max(0, elapsed - 0.1) / 0.45);
+      const timeSeconds = performance.now() * 0.001;
+      setDoorRootToBackWall(
+        roomZeroRuntime,
+        introDoorHiddenY + (introDoorVisibleY - introDoorHiddenY) * doorRise
       );
       ambient.light.intensity = 0.01 * lightRig.ambient * reveal;
       directional.light.intensity = 0.015 * lightRig.key * reveal;
@@ -1101,156 +1372,228 @@ async function buildWorld() {
       roomZeroRuntime.transitionLight.light.intensity = 0.06 * lightRig.transition * room0Rig.transition * reveal;
       setLightGroupIntensity(roomZeroRuntime.roomLights, 0.04 * lightRig.roomFill * room0Rig.fill * reveal);
       experienceState.introOutlineMaterial.emissiveIntensity = 0.028 + reveal * 0.035;
+      leftDoorLight.setPosition(experienceState.introDoorLightRig.left.position);
+      leftDoorLight.setEulerAngles(experienceState.introDoorLightRig.left.rotation);
+      rightDoorLight.setPosition(experienceState.introDoorLightRig.right.position);
+      rightDoorLight.setEulerAngles(experienceState.introDoorLightRig.right.rotation);
       experienceState.introDoorLights.forEach((light) => {
-        light.light.intensity = reveal * 0.12 * lightRig.introDoors;
-        light.light.range = 0.9 + reveal * 1.2;
+        const lightConfig = light === leftDoorLight ? experienceState.introDoorLightRig.left : experienceState.introDoorLightRig.right;
+        light.light.intensity = reveal * 0.12 * lightRig.introDoors * lightConfig.intensity;
+        light.light.range = lightConfig.range;
       });
-      sceneEffects.cubesVisible = 0;
       experienceState.introDoorOccluder.enabled = reveal < 0.68;
-      if (reveal > 0.72) {
-        roomZeroRuntime.doors.forEach((door) => door.setOpen(true));
-      }
+      setRunwayGuidePulse(roomZeroRuntime, reveal * 0.2, timeSeconds);
     }
   });
 
-  // seconda stanza
-  railSequence.addStep({
-    label: 'Tunnel',
-    roomId: 1,
-    position: new pc.Vec3(0, 1.62, 1.55),
-    lookAt: new pc.Vec3(0, 1.2, -2.2),
-    dwell: 0.45,
-    moveSmoothing: 15.0,
-    lookSmoothing: 7.2,
-    onEnter: () => {
-      roomZeroRuntime.room.structureEntities.forEach((entity) => { entity.enabled = false; });
-      roomZeroRuntime.doors.forEach((door) => door.setOpen(true));
-      heartRoomRuntime.doors.forEach((door) => door.setOpen(true));
-      experienceState.introDoorOccluder.enabled = false;
-    },
-    onUpdate: ({ elapsed, movementProgress }) => {
-      const room0Rig = getRoomRig(0);
-      const room1Rig = getRoomRig(1);
-      const rush = easeInOut01(Math.max(elapsed, movementProgress * 1.4));
-      camera.camera.fov = getAdjustedFov(52 + rush * 34);
-      ambient.light.intensity = (0.0008 + rush * 0.0012) * lightRig.ambient;
-      directional.light.intensity = 0.003 * lightRig.key;
-      roomZeroRuntime.interiorLight.light.intensity = 0 * lightRig.interior * room0Rig.interior;
-      roomZeroRuntime.transitionLight.light.intensity = 0 * lightRig.transition * room0Rig.transition;
-      setLightGroupIntensity(roomZeroRuntime.roomLights, 0);
-      experienceState.introDoorLights.forEach((light) => {
-        light.light.intensity = (0.12 - rush * 0.09) * lightRig.introDoors;
-      });
-      heartRoomRuntime.transitionLight.light.intensity = (0.02 + rush * 0.08) * lightRig.transition * room1Rig.transition;
-      sceneEffects.heartFireflyVisibility = 0.16 + rush * 0.46;
-      sceneEffects.heartFireflySpeed = 0.08 + rush * 0.1;
-      sceneEffects.heartLightBoost = 0.16 + rush * 0.14;
-    }
+  // QUI VIENE COSTRUITA LA SEQUENZA DELLE 8 STANZE TUNNEL attraversate tra il prologo e la stanza cuore.
+  tunnelRuntimes.forEach((tunnelRoom, tunnelIndex) => {
+    const isLastTunnelRoom = tunnelIndex === tunnelRuntimes.length - 1;
+    railSequence.addStep({
+      label: `Tunnel ${tunnelIndex + 1}`,
+      roomId: tunnelRoom.id,
+      position: new pc.Vec3(0, 1.66, tunnelRoom.room.zCenter + 1.6),
+      lookAt: new pc.Vec3(0, 1.42, tunnelRoom.room.zCenter - 6.8),
+      dwell: 0.02,
+      moveSmoothing: 11.0,
+      lookSmoothing: 5.0,
+      onEnter: () => {
+        roomZeroRuntime.room.structureEntities.forEach((entity) => { entity.enabled = false; });
+        roomZeroRuntime.doors.forEach((door) => door.setOpen(true));
+        tunnelRuntimes.forEach((roomState) => roomState.doors.forEach((door) => door.setOpen(true)));
+        if (isLastTunnelRoom) {
+          heartRoomRuntime.doors.forEach((door) => door.setOpen(true));
+        }
+        experienceState.introDoorOccluder.enabled = false;
+        experienceState.heartDoorOccluder.enabled = false;
+        setCanvasTunnelEffect(0.15, 1.02);
+      },
+      onUpdate: ({ elapsed, movementProgress }) => {
+        const room0Rig = getRoomRig(0);
+        const room1Rig = getRoomRig(9);
+        const timeSeconds = performance.now() * 0.001;
+        const globalTunnelProgress = getTunnelRouteProgress(tunnelIndex, movementProgress);
+        const rush = getTunnelRush(globalTunnelProgress);
+        const fovKick = Math.sin(timeSeconds * 11 + globalTunnelProgress * 12) * 1.35 * rush;
+        camera.camera.fov = getAdjustedFov(64 + rush * 34 + fovKick);
+        setCanvasTunnelEffect(0.18 + rush * 0.62, 1.02 + rush * 0.035);
+        ambient.light.intensity = (0.00035 + rush * 0.0009) * lightRig.ambient;
+        directional.light.intensity = 0.0016 * lightRig.key;
+        roomZeroRuntime.interiorLight.light.intensity = 0 * lightRig.interior * room0Rig.interior;
+        roomZeroRuntime.transitionLight.light.intensity = 0 * lightRig.transition * room0Rig.transition;
+        setLightGroupIntensity(roomZeroRuntime.roomLights, 0);
+        experienceState.introDoorLights.forEach((light) => {
+          light.light.intensity = (0.08 - rush * 0.05) * lightRig.introDoors;
+        });
+        setRunwayGuidePulse(roomZeroRuntime, 0.08 + rush * 0.28, timeSeconds);
+        tunnelRuntimes.forEach((roomState, roomIndex) => {
+          const localBoost = roomState.id === tunnelRoom.id ? 0.22 + rush * 0.7 : 0.06 + rush * 0.16;
+          setRunwayGuidePulse(roomState, localBoost, timeSeconds + roomIndex * 0.12);
+        });
+        heartRoomRuntime.transitionLight.light.intensity = (0.01 + rush * 0.04) * lightRig.transition * room1Rig.transition;
+        sceneEffects.heartFireflyVisibility = 0.08 + rush * 0.28;
+        sceneEffects.heartFireflySpeed = 0.1 + rush * 0.12;
+        sceneEffects.heartLightBoost = 0.12 + rush * 0.16;
+      }
+    });
   });
 
   // terza stanza
+  const heartLandingPosition = new pc.Vec3(0.2, 1.82, heartRoomRuntime.room.zCenter + 2.8);
+  const heartLookTarget = new pc.Vec3(0, 1.84, heartRoomRuntime.room.zCenter - 2.0);
+  let heartLandingDebugLogged = false;
   railSequence.addStep({
     label: 'Cuore',
-    roomId: 1,
-    position: new pc.Vec3(0.0, 1.58, 0.12),
-    lookAt: new pc.Vec3(0, 1.24, -2.0),
+    roomId: 9,
+    // PUNTO DI ATTERRAGGIO NELLA STANZA CUORE: cambia questa position per spostare dove la camera arriva dopo il tunnel.
+    position: heartLandingPosition.clone(),
+    lookAt: heartLookTarget.clone(),
     dwell: 999,
     autoAdvance: false,
-    onUpdate: ({ elapsed, step }) => {
-      const orbitSpeed = 0.18;
-      const orbitAngle = elapsed * orbitSpeed;
-      const orbitCenter = new pc.Vec3(0, 1.84, -2.0);
+    onEnter: () => {
+      const orbitCenter = heartLookTarget.clone();
+      const orbitRadius = 2.4;
+      heartLandingDebugLogged = false;
+      tunnelRuntimes.forEach((roomState) => setRunwayGuidePulse(roomState, 0, 0));
+      roomZeroRuntime.doors.forEach((door) => door.setOpen(false));
+      heartRoomRuntime.doors.forEach((door) => door.setOpen(false));
+      setDoorGroupColor(roomZeroRuntime, new pc.Color(0.8, 0.03, 0.03));
+      setDoorGroupColor(heartRoomRuntime, new pc.Color(0.8, 0.03, 0.03));
+      setDoorGroupOpacity(roomZeroRuntime, 1);
+      setDoorGroupOpacity(heartRoomRuntime, 1);
+      experienceState.introDoorOccluder.enabled = true;
+      experienceState.heartDoorOccluder.enabled = true;
+      camera.camera.fov = getHeartSceneFov(50);
+      railSequence.getCurrentStep()?.position.copy(heartLandingPosition);
+      railSequence.getCurrentStep()?.lookAt.copy(heartLookTarget);
+      setCanvasTunnelEffect(0, 1);
+      console.log('%c[LANDING DEBUG] TARGET STANZA CUORE', 'color: #ff5555; font-weight: bold;');
+      console.log({
+        roomSequence: heartRoomRuntime.config?.sequenceNumber,
+        roomId: heartRoomRuntime.id,
+        roomZCenter: heartRoomRuntime.room.zCenter,
+        roomBackWallZ: heartRoomRuntime.room.backWallZ,
+        landingPosition: {
+          x: Number(heartLandingPosition.x.toFixed(3)),
+          y: Number(heartLandingPosition.y.toFixed(3)),
+          z: Number(heartLandingPosition.z.toFixed(3))
+        },
+        lookTarget: {
+          x: Number(heartLookTarget.x.toFixed(3)),
+          y: Number(heartLookTarget.y.toFixed(3)),
+          z: Number(heartLookTarget.z.toFixed(3))
+        }
+      });
+    },
+    onUpdate: ({ elapsed, holdElapsed, movementProgress, reachedTarget, step }) => {
+      const orbitSpeed = 0.14;
+      const orbitCenter = heartLookTarget;
+      const orbitRadius = 2.4;
+      const orbitHeight = 1.9;
+      const targetFov = 50;
 
-      let focusOffset = new pc.Vec3(0, 0.02, 0);
-      let targetFov = 57;
-      let orbitRadius = 2.2;
-      let orbitHeight = 1.55;
-
-      if (elapsed > 4 && elapsed <= 8) {
-        focusOffset = new pc.Vec3(0.18, 0.12, 0.04);
-        targetFov = 45;
-        orbitRadius = 1.75;
-        orbitHeight = 1.82;
-      } else if (elapsed > 8 && elapsed <= 12) {
-        focusOffset = new pc.Vec3(-0.14, -0.08, -0.03);
-        targetFov = 42;
-        orbitRadius = 1.6;
-        orbitHeight = 1.38;
-      } else if (elapsed > 12) {
-        focusOffset = new pc.Vec3(0.05, 0.22, 0.02);
-        targetFov = 48;
-        orbitRadius = 1.9;
-        orbitHeight = 1.95;
+      if (reachedTarget) {
+        const orbitAngle = holdElapsed * orbitSpeed;
+        step.position.set(
+          orbitCenter.x + Math.cos(orbitAngle) * orbitRadius,
+          orbitHeight,
+          orbitCenter.z + Math.sin(orbitAngle) * orbitRadius
+        );
+        step.lookAt.set(
+          orbitCenter.x,
+          orbitCenter.y,
+          orbitCenter.z
+        );
+      } else {
+        step.position.copy(heartLandingPosition);
+        step.lookAt.copy(heartLookTarget);
       }
 
-      step.position.set(
-        orbitCenter.x + Math.cos(orbitAngle) * orbitRadius,
-        orbitHeight + Math.sin(orbitAngle * 0.7) * 0.06,
-        orbitCenter.z + Math.sin(orbitAngle) * orbitRadius
-      );
-      step.lookAt.set(
-        orbitCenter.x + focusOffset.x,
-        orbitCenter.y + focusOffset.y,
-        orbitCenter.z + focusOffset.z
-      );
+      if (reachedTarget && !heartLandingDebugLogged) {
+        heartLandingDebugLogged = true;
+        const actualPosition = cameraPivot.getPosition();
+        console.log('%c[LANDING DEBUG] ATTERRAGGIO RAGGIUNTO', 'color: #00ffaa; font-weight: bold;');
+        console.log({
+          roomSequence: heartRoomRuntime.config?.sequenceNumber,
+          roomId: heartRoomRuntime.id,
+          expectedLandingPosition: {
+            x: Number(heartLandingPosition.x.toFixed(3)),
+            y: Number(heartLandingPosition.y.toFixed(3)),
+            z: Number(heartLandingPosition.z.toFixed(3))
+          },
+          actualCameraPosition: {
+            x: Number(actualPosition.x.toFixed(3)),
+            y: Number(actualPosition.y.toFixed(3)),
+            z: Number(actualPosition.z.toFixed(3))
+          },
+          expectedLookTarget: {
+            x: Number(heartLookTarget.x.toFixed(3)),
+            y: Number(heartLookTarget.y.toFixed(3)),
+            z: Number(heartLookTarget.z.toFixed(3))
+          }
+        });
+      }
 
-      camera.camera.fov = pc.math.lerp(camera.camera.fov, getHeartSceneFov(targetFov), 0.06);
+      if (!reachedTarget) {
+        const timeSeconds = performance.now() * 0.001;
+        const globalTunnelProgress = getTunnelRouteProgress(0, movementProgress, true);
+        const rush = getTunnelRush(globalTunnelProgress);
+        const fovKick = Math.sin(timeSeconds * 11 + globalTunnelProgress * 12) * 1.1 * rush;
+        camera.camera.fov = pc.math.lerp(camera.camera.fov, getAdjustedFov(62 + rush * 24 + fovKick), 0.08);
+        setCanvasTunnelEffect(0.1 + rush * 0.34, 1.01 + rush * 0.02);
+      } else {
+        camera.camera.fov = pc.math.lerp(camera.camera.fov, getHeartSceneFov(targetFov), 0.06);
+        setCanvasTunnelEffect(0, 1);
+      }
+      roomZeroRuntime.doors.forEach((door) => door.setOpen(false));
+      heartRoomRuntime.doors.forEach((door) => door.setOpen(false));
+      const doorFade = easeInOut01(elapsed / 2.4);
+      const fadedDoorColor = new pc.Color(
+        pc.math.lerp(0.8, 0.02, doorFade),
+        pc.math.lerp(0.03, 0.02, doorFade),
+        pc.math.lerp(0.03, 0.02, doorFade)
+      );
+      setDoorGroupColor(roomZeroRuntime, fadedDoorColor);
+      setDoorGroupColor(heartRoomRuntime, fadedDoorColor);
+      const doorOpacity = pc.math.lerp(1, 0.02, doorFade);
+      setDoorGroupOpacity(roomZeroRuntime, doorOpacity);
+      setDoorGroupOpacity(heartRoomRuntime, doorOpacity);
+      experienceState.introDoorOccluder.enabled = true;
+      experienceState.heartDoorOccluder.enabled = true;
       setHeartRoomMood(elapsed + 1.5);
       sceneEffects.heartFireflyVisibility = 0.9;
     }
   });
 
-  const sliderBindings = [
-    ['ambient-slider', 'ambient-value', 'ambient'],
-    ['key-slider', 'key-value', 'key'],
-    ['fill-slider', 'fill-value', 'roomFill'],
-    ['interior-slider', 'interior-value', 'interior'],
-    ['transition-slider', 'transition-value', 'transition'],
-    ['heart-slider', 'heart-value', 'heartCore'],
-    ['firefly-slider', 'firefly-value', 'fireflies'],
-    ['door-slider', 'door-value', 'introDoors'],
-    ['heart-spot-a-slider', 'heart-spot-a-value', 'heartSpotA'],
-    ['heart-spot-b-slider', 'heart-spot-b-value', 'heartSpotB'],
-    ['heart-spot-c-slider', 'heart-spot-c-value', 'heartSpotC'],
-    ['camera-fov-global-slider', 'camera-fov-global-value', 'cameraFovGlobal'],
-    ['camera-fov-heart-slider', 'camera-fov-heart-value', 'cameraFovHeart']
-  ];
-  const roomSliderBindings = [];
-  for (let roomId = 0; roomId < 4; roomId++) {
-    roomSliderBindings.push(
-      [`room-${roomId}-fill-slider`, `room-${roomId}-fill-value`, roomId, 'fill'],
-      [`room-${roomId}-interior-slider`, `room-${roomId}-interior-value`, roomId, 'interior'],
-      [`room-${roomId}-transition-slider`, `room-${roomId}-transition-value`, roomId, 'transition']
-    );
-  }
-
-  sliderBindings.forEach(([sliderId, valueId, key]) => {
-    const slider = document.getElementById(sliderId);
-    const value = document.getElementById(valueId);
-    if (!slider || !value) return;
-
-    const syncValue = () => {
-      lightRig[key] = Number(slider.value);
-      value.textContent = Number(slider.value).toFixed(2);
-    };
-
-    slider.addEventListener('input', syncValue);
-    syncValue();
-  });
-
-  roomSliderBindings.forEach(([sliderId, valueId, roomId, key]) => {
-    const slider = document.getElementById(sliderId);
-    const value = document.getElementById(valueId);
-    if (!slider || !value) return;
-
-    const syncValue = () => {
-      lightRig.rooms[roomId][key] = Number(slider.value);
-      value.textContent = Number(slider.value).toFixed(2);
-    };
-
-    slider.addEventListener('input', syncValue);
-    syncValue();
-  });
+  setDebugLightLabels();
+  bindRigSlider('room0-left-x', 'room0-left-x-value', experienceState.introDoorLightRig.left, 'position.x');
+  bindRigSlider('room0-left-y', 'room0-left-y-value', experienceState.introDoorLightRig.left, 'position.y');
+  bindRigSlider('room0-left-z', 'room0-left-z-value', experienceState.introDoorLightRig.left, 'position.z');
+  bindRigSlider('room0-left-rx', 'room0-left-rx-value', experienceState.introDoorLightRig.left, 'rotation.x');
+  bindRigSlider('room0-left-ry', 'room0-left-ry-value', experienceState.introDoorLightRig.left, 'rotation.y');
+  bindRigSlider('room0-left-rz', 'room0-left-rz-value', experienceState.introDoorLightRig.left, 'rotation.z');
+  bindRigSlider('room0-left-intensity', 'room0-left-intensity-value', experienceState.introDoorLightRig.left, 'intensity');
+  bindRigSlider('room0-right-x', 'room0-right-x-value', experienceState.introDoorLightRig.right, 'position.x');
+  bindRigSlider('room0-right-y', 'room0-right-y-value', experienceState.introDoorLightRig.right, 'position.y');
+  bindRigSlider('room0-right-z', 'room0-right-z-value', experienceState.introDoorLightRig.right, 'position.z');
+  bindRigSlider('room0-right-rx', 'room0-right-rx-value', experienceState.introDoorLightRig.right, 'rotation.x');
+  bindRigSlider('room0-right-ry', 'room0-right-ry-value', experienceState.introDoorLightRig.right, 'rotation.y');
+  bindRigSlider('room0-right-rz', 'room0-right-rz-value', experienceState.introDoorLightRig.right, 'rotation.z');
+  bindRigSlider('room0-right-intensity', 'room0-right-intensity-value', experienceState.introDoorLightRig.right, 'intensity');
+  bindRigSlider('heart-interior-x', 'heart-interior-x-value', experienceState.heartRoomLightRig.interior, 'position.x');
+  bindRigSlider('heart-interior-y', 'heart-interior-y-value', experienceState.heartRoomLightRig.interior, 'position.y');
+  bindRigSlider('heart-interior-z', 'heart-interior-z-value', experienceState.heartRoomLightRig.interior, 'position.z');
+  bindRigSlider('heart-interior-rx', 'heart-interior-rx-value', experienceState.heartRoomLightRig.interior, 'rotation.x');
+  bindRigSlider('heart-interior-ry', 'heart-interior-ry-value', experienceState.heartRoomLightRig.interior, 'rotation.y');
+  bindRigSlider('heart-interior-rz', 'heart-interior-rz-value', experienceState.heartRoomLightRig.interior, 'rotation.z');
+  bindRigSlider('heart-interior-intensity', 'heart-interior-intensity-value', experienceState.heartRoomLightRig.interior, 'intensity');
+  bindRigSlider('heart-transition-x', 'heart-transition-x-value', experienceState.heartRoomLightRig.transition, 'position.x');
+  bindRigSlider('heart-transition-y', 'heart-transition-y-value', experienceState.heartRoomLightRig.transition, 'position.y');
+  bindRigSlider('heart-transition-z', 'heart-transition-z-value', experienceState.heartRoomLightRig.transition, 'position.z');
+  bindRigSlider('heart-transition-rx', 'heart-transition-rx-value', experienceState.heartRoomLightRig.transition, 'rotation.x');
+  bindRigSlider('heart-transition-ry', 'heart-transition-ry-value', experienceState.heartRoomLightRig.transition, 'rotation.y');
+  bindRigSlider('heart-transition-rz', 'heart-transition-rz-value', experienceState.heartRoomLightRig.transition, 'rotation.z');
+  bindRigSlider('heart-transition-intensity', 'heart-transition-intensity-value', experienceState.heartRoomLightRig.transition, 'intensity');
 
   debugUi.pauseButton?.addEventListener('click', () => {
     const paused = railSequence.togglePause();
@@ -1260,6 +1603,10 @@ async function buildWorld() {
   debugUi.nextButton?.addEventListener('click', () => {
     if (!railSequence.isPaused()) return;
     railSequence.goNext();
+  });
+
+  debugUi.performanceButton?.addEventListener('click', () => {
+    applyPerformanceMode(!performanceState.enabled);
   });
 
   debugUi.toggleButton?.addEventListener('click', () => {
@@ -1284,16 +1631,23 @@ async function buildWorld() {
     }
   });
 
-  function formatVec3(vec) {
-    return `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`;
-  }
+  debugUi.copyHeartLightJsonButton?.addEventListener('click', async () => {
+    const payload = JSON.stringify(getHeartRoomLightPayload(), null, 2);
 
-  function syncActiveAccordion(activeRoomId) {
-    debugUi.roomAccordions.forEach((accordion) => {
-      const roomId = Number(accordion.dataset.roomId);
-      accordion.open = roomId === activeRoomId;
-    });
-  }
+    try {
+      await navigator.clipboard.writeText(payload);
+      debugUi.copyHeartLightJsonButton.textContent = 'JSON Cuore Copiato';
+      setTimeout(() => {
+        if (debugUi.copyHeartLightJsonButton) debugUi.copyHeartLightJsonButton.textContent = 'Copia JSON Cuore';
+      }, 1200);
+    } catch (error) {
+      console.error('Copia JSON cuore fallita:', error);
+      debugUi.copyHeartLightJsonButton.textContent = 'Copia Fallita';
+      setTimeout(() => {
+        if (debugUi.copyHeartLightJsonButton) debugUi.copyHeartLightJsonButton.textContent = 'Copia JSON Cuore';
+      }, 1200);
+    }
+  });
 
   function setDebugUiVisible(visible) {
     debugUiVisible = visible;
@@ -1307,12 +1661,11 @@ async function buildWorld() {
     const cameraRot = cameraPivot.getEulerAngles();
     const activeRoomId = manager.getActiveRoom();
     const currentStep = railSequence.getCurrentStep();
-    const heartSpots = getHeartSpotLiveState();
 
     return {
       camera: {
         activeRoom: activeRoomId,
-        accordion: activeRoomId >= 0 ? `Stanza ${activeRoomId}` : 'nessuno',
+        accordion: activeRoomId >= 0 ? getRoomSequenceLabel(activeRoomId) : 'nessuno',
         step: currentStep?.label ?? 'attesa avvio',
         rail: railSequence.isPaused() ? 'in pausa' : railSequence.hasStarted() ? 'attivo' : 'non avviato',
         position: {
@@ -1327,19 +1680,14 @@ async function buildWorld() {
         },
         fov: Number(camera.camera.fov.toFixed(2))
       },
-      accordions: {
-        globalOpen: Boolean(debugUi.globalAccordion?.open),
-        roomOpen: debugUi.roomAccordions
-          .filter((accordion) => accordion.open)
-          .map((accordion) => Number(accordion.dataset.roomId))
-      },
       global: {
         ambient: lightRig.ambient,
         key: lightRig.key,
         roomFill: lightRig.roomFill,
         interior: lightRig.interior,
         transition: lightRig.transition,
-        cameraFovGlobal: lightRig.cameraFovGlobal
+      cameraFovGlobal: lightRig.cameraFovGlobal,
+      performanceMode: performanceState.enabled
       },
       rooms: roomRuntime.map((roomState) => {
         const config = {
@@ -1352,20 +1700,16 @@ async function buildWorld() {
           config.introDoors = lightRig.introDoors;
         }
 
-        if (roomState.id === 1) {
+        if (roomState.id === 9) {
           config.heartCore = lightRig.heartCore;
           config.fireflies = lightRig.fireflies;
-          config.heartSpotA = lightRig.heartSpotA;
-          config.heartSpotB = lightRig.heartSpotB;
-          config.heartSpotC = lightRig.heartSpotC;
           config.cameraFovHeart = lightRig.cameraFovHeart;
         }
 
         return {
           id: roomState.id,
-          label: `Stanza ${roomState.id}`,
+          label: getRoomSequenceLabel(roomState.id),
           active: roomState.id === activeRoomId,
-          accordionOpen: debugUi.roomAccordions.find((accordion) => Number(accordion.dataset.roomId) === roomState.id)?.open ?? false,
           sliders: config,
           live: {
             fill: Number(roomState.softFillLight.light.intensity.toFixed(3)),
@@ -1373,10 +1717,7 @@ async function buildWorld() {
             transition: Number(roomState.transitionLight.light.intensity.toFixed(3)),
             lights: Object.fromEntries(
               roomState.roomLights.map((light) => [light.name, Number(light.light.intensity.toFixed(3))])
-            ),
-            heartSpots: roomState.id === 1 ? Object.fromEntries(
-              Object.entries(heartSpots).map(([key, value]) => [key, Number(value.toFixed(3))])
-            ) : undefined
+            )
           }
         };
       })
@@ -1386,8 +1727,6 @@ async function buildWorld() {
   function updateDebugPanel() {
     const activeRoomId = manager.getActiveRoom();
     const debugState = buildDebugState();
-
-    syncActiveAccordion(activeRoomId);
     if (debugUi.nextButton) {
       debugUi.nextButton.disabled = !railSequence.isPaused();
       debugUi.nextButton.style.opacity = railSequence.isPaused() ? '1' : '0.5';
@@ -1396,7 +1735,34 @@ async function buildWorld() {
     const jsonText = JSON.stringify(debugState, null, 2);
     debugUi.cameraDebug.textContent = JSON.stringify(debugState.camera, null, 2);
     debugUi.roomsDebug.textContent = JSON.stringify(debugState.rooms, null, 2);
+    if (debugUi.room0LightDebug) {
+      debugUi.room0LightDebug.textContent = JSON.stringify(getRoom0LightPayload(), null, 2);
+    }
+    if (debugUi.heartLightDebug) {
+      debugUi.heartLightDebug.textContent = JSON.stringify(getHeartRoomLightPayload(), null, 2);
+    }
     if (debugUi.overlay) debugUi.overlay.textContent = jsonText;
+    updateDebugLightLabels();
+  }
+
+  applyPerformanceMode(false);
+
+  function jumpToRoomForDebug(roomId) {
+    const targetRoom = roomRuntime.find((roomState) => roomState.id === roomId);
+    if (!targetRoom) return;
+
+    if (railSequence.hasStarted() && !railSequence.isPaused()) {
+      railSequence.togglePause();
+    }
+
+    cameraPivot.setPosition(0, 1.75, targetRoom.room.zCenter + 2.6);
+    cameraPivot.setEulerAngles(0, 180, 0);
+    manager.onRoomEnter(roomId);
+
+    roomRuntime.forEach((roomState) => {
+      const shouldOpen = roomState.id === roomId;
+      roomState.doors.forEach((door) => door.setOpen(shouldOpen));
+    });
   }
 
   // ===== SISTEMA DI DEBUG: Modalità editing modelli =====
@@ -1536,7 +1902,10 @@ async function buildWorld() {
   });
 
   // Raycast per selezionare modelli
-  const raycaster = new pc.RaycastResult();
+  const rayOrigin = new pc.Vec3();
+  const rayTarget = new pc.Vec3();
+  const rayDirection = new pc.Vec3();
+  const rayEnd = new pc.Vec3();
   app.on('update', (dt) => {
     playerController.update(dt);
     manager.update(cameraPivot.getPosition(), dt);
@@ -1546,7 +1915,6 @@ async function buildWorld() {
     //   rooms[1].helmet.rotate(0, 30 * dt, 0);
     // }
 
-    roomTriggers.forEach((trigger) => trigger.update(cameraPivot.getPosition()));
     railSequence.update(dt);
     updateDebugPanel();
 
@@ -1554,15 +1922,18 @@ async function buildWorld() {
     if (debugMode.active) {
       const canvas = document.getElementById('app');
       const rect = canvas.getBoundingClientRect();
-      const mouseX = (event?.clientX - rect.left || 0) / canvas.width * 2 - 1;
-      const mouseY = (event?.clientY - rect.top || 0) / canvas.height * -2 + 1;
+      const clientX = event?.clientX ?? rect.left + rect.width * 0.5;
+      const clientY = event?.clientY ?? rect.top + rect.height * 0.5;
+      const mouseX = clientX - rect.left;
+      const mouseY = clientY - rect.top;
 
-      const ray = camera.camera.getRay(mouseX, mouseY);
+      camera.camera.screenToWorld(mouseX, mouseY, camera.camera.nearClip, rayOrigin);
+      camera.camera.screenToWorld(mouseX, mouseY, camera.camera.farClip, rayTarget);
+      rayDirection.sub2(rayTarget, rayOrigin).normalize();
+      rayEnd.copy(rayOrigin).add(rayDirection.clone().mulScalar(camera.camera.farClip));
       
-      const result = app.systems.rigidbody.raycastFirst(ray.origin, ray.direction, { 
-        filterGroup: undefined,
-        filterMask: undefined
-      });
+      const rigidbodySystem = app.systems.rigidbody;
+      const result = rigidbodySystem?.raycastFirst ? rigidbodySystem.raycastFirst(rayOrigin, rayEnd) : null;
 
       if (result) {
         const entity = result.entity;
@@ -1586,7 +1957,14 @@ async function buildWorld() {
     }
   });
 
-  markSceneReady();
+  warmupRenderableAssets(app.root);
+  window.requestAnimationFrame(() => {
+    app.renderNextFrame = true;
+    window.requestAnimationFrame(() => {
+      app.renderNextFrame = true;
+      markSceneReady();
+    });
+  });
 }
 
 buildWorld().catch((error) => {
